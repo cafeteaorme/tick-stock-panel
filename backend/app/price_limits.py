@@ -15,12 +15,19 @@ LEGACY_MAIN_BOARD_ST_LIMIT = 0.05
 GROWTH_BOARD_LIMIT = 0.20
 BEIJING_BOARD_LIMIT = 0.30
 
+# 港股/美股无涨跌停: 用超大哨兵值使 limit_up/limit_down 判定永不触发
+NO_LIMIT = 1e9
+
 
 def is_risk_warning_name(name: str | None) -> bool:
     return "ST" in str(name or "").upper()
 
 
 def board_limit_pct(symbol: str) -> float:
+    from app.markets import is_hk_or_us
+
+    if is_hk_or_us(symbol):
+        return NO_LIMIT
     if symbol.endswith(".BJ"):
         return BEIJING_BOARD_LIMIT
     if symbol.startswith(("300", "301", "688", "689")):
@@ -50,12 +57,19 @@ def polars_price_limit_pct(
     is_risk_warning: pl.Expr,
 ) -> pl.Expr:
     """Return a vectorized Polars expression for the effective daily limit."""
+    from app.markets import is_hk_or_us
+
+    is_hk_us = pl.lit(is_hk_or_us(str(symbol))) if isinstance(symbol, str) else (
+        symbol.str.to_uppercase().str.ends_with(".HK")
+        | symbol.str.to_uppercase().str.ends_with(".US")
+    )
     is_growth = symbol.str.starts_with("300") | symbol.str.starts_with("301")
     is_star = symbol.str.starts_with("688") | symbol.str.starts_with("689")
     is_beijing = symbol.str.ends_with(".BJ")
     is_non_main = is_growth | is_star | is_beijing
     base = (
-        pl.when(is_growth | is_star).then(GROWTH_BOARD_LIMIT)
+        pl.when(is_hk_us).then(pl.lit(NO_LIMIT))
+        .when(is_growth | is_star).then(GROWTH_BOARD_LIMIT)
         .when(is_beijing).then(BEIJING_BOARD_LIMIT)
         .otherwise(MAIN_BOARD_LIMIT)
     )

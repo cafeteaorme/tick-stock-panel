@@ -105,8 +105,28 @@ def sync_daily_batch(symbols: list[str],
     """
     tf = get_client()
     out: list[pl.DataFrame] = []
-    chunks = chunked(symbols, batch_size)
     failed_syms: list[str] = []
+
+    # 港美股: klines.batch 是 A股权限, 港美股走单只 klines.get
+    from app.markets import is_hk_or_us
+
+    hk_us_syms = [s for s in symbols if is_hk_or_us(s)]
+    symbols = [s for s in symbols if not is_hk_or_us(s)]
+    for sym in hk_us_syms:
+        try:
+            kwargs: dict = {"period": "1d", "adjust": "none", "as_dataframe": True}
+            if start_time and end_time:
+                kwargs.update(start_time=_datetime_to_ms(start_time), end_time=_datetime_to_ms(end_time))
+            else:
+                kwargs["count"] = count or 250
+            sub = tf.klines.get(sym, **kwargs)
+            if sub is not None and len(sub) > 0:
+                out.append(_normalize_daily(sub, default_symbol=sym))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("hk/us daily fetch failed %s: %s", sym, e)
+            failed_syms.append(sym)
+
+    chunks = chunked(symbols, batch_size)
 
     for i, chunk in enumerate(chunks):
         sleep_between_batches(i, rpm)

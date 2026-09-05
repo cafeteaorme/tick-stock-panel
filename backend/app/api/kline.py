@@ -162,6 +162,49 @@ def search_instruments(
             else (collected[0] if collected else df.head(0))
         )
     rows = matched.select(["symbol", "name", "code", "asset_type"]).to_dicts()
+
+    # 港美股字典补充: 未满 limit 时从 instruments_hk/us 追加 (带 region 标签)。
+    # 本地无港美股表时触发一次后台同步, 下次搜索即有结果。
+    if len(rows) < limit:
+        from app.markets import get_region
+
+        try:
+            hk_us = repo.get_hk_us_instruments()
+        except Exception:  # noqa: BLE001
+            hk_us = pl.DataFrame()
+        if hk_us.is_empty() and q.strip():
+            from app.services.hk_us_instruments import sync_hk_us_instruments_background
+            sync_hk_us_instruments_background(repo.store.data_dir)
+        elif not hk_us.is_empty() and "symbol" in hk_us.columns:
+            kw = q.strip().upper()
+            hu = hk_us.with_columns([
+                pl.col("symbol").cast(pl.Utf8).alias("symbol"),
+                (pl.col("name").cast(pl.Utf8) if "name" in hk_us.columns else pl.lit("")).alias("name"),
+                (pl.col("code").cast(pl.Utf8) if "code" in hk_us.columns else pl.lit("")).alias("code"),
+            ])
+            hu_mask_prefix = (
+                pl.col("code").str.starts_with(kw)
+                | pl.col("symbol").str.to_uppercase().str.starts_with(kw)
+            )
+            hu_mask_contains = (
+                pl.col("code").str.contains(kw, literal=True)
+                | pl.col("symbol").str.to_uppercase().str.contains(kw, literal=True)
+                | pl.col("name").str.to_uppercase().str.contains(kw, literal=True)
+            )
+            hu_prefix = hu.filter(hu_mask_prefix).head(limit - len(rows))
+            hu_hits = hu_prefix
+            if hu_prefix.height < limit - len(rows):
+                seen_syms = [r["symbol"] for r in hu_prefix.select("symbol").to_dicts()]
+                hu_rest = hu.filter(hu_mask_contains & ~pl.col("symbol").is_in(seen_syms)).head(limit - len(rows) - hu_prefix.height)
+                hu_hits = pl.concat([hu_prefix, hu_rest], how="vertical") if hu_rest.height else hu_prefix
+            for r in hu_hits.select(["symbol", "name", "code"]).to_dicts():
+                r["asset_type"] = "stock"
+                r["region"] = get_region(r["symbol"])
+                rows.append(r)
+
+    # A股结果补 region 字段, 保持响应结构一致
+    for r in rows:
+        r.setdefault("region", "CN")
     return {"results": rows}
 
 
@@ -794,6 +837,21 @@ def sync_batch(
     capset = request.app.state.capabilities
     n = kline_sync.sync_and_persist_daily_batch(symbols, repo, capset, count=days)
     return {"symbols": symbols, "rows_written": n}
+
+
+@router.post("/sync_instruments_hk_us")
+def sync_instruments_hk_us(request: Request, exchanges: str = Query("HK,US")):
+    """同步港美股标的字典 (instruments_hk/ + instruments_us/)。
+
+    该字典用于自选搜索与截图识别的港美股代码匹配, 不进入 A股选股 universe。
+    """
+    from app.services.hk_us_instruments import sync_hk_us_instruments
+
+    repo = request.app.state.repo
+    ex_list = tuple(e.strip().upper() for e in exchanges.split(",") if e.strip().upper() in ("HK", "US"))
+    counts = sync_hk_us_instruments(repo.store.data_dir, ex_list or ("HK", "US"))
+    repo.invalidate_hk_us_instruments()
+    return {"counts": counts}
 
 
 @router.post("/refresh_views")

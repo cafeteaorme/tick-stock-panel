@@ -241,6 +241,12 @@ export interface WatchlistImportCandidate {
   name: string | null
   matched: boolean
   already_in_watchlist: boolean
+  /** 市场: CN / HK / US */
+  market?: string
+  /** 持仓数量 (股) */
+  qty?: number | null
+  /** 成本价 */
+  cost?: number | null
 }
 
 export interface WatchlistImportResult {
@@ -1284,7 +1290,7 @@ export const api = {
       body: JSON.stringify({ symbols, date }),
     }),
   instrumentSearch: (q: string, limit = 20, assetTypes?: string) =>
-    request<{ results: { symbol: string; name: string; code: string; asset_type?: string }[] }>(
+    request<{ results: { symbol: string; name: string; code: string; asset_type?: string; region?: string }[] }>(
       `/api/kline/instruments/search?q=${encodeURIComponent(q)}&limit=${limit}${assetTypes ? `&asset_types=${encodeURIComponent(assetTypes)}` : ''}`,
     ),
 

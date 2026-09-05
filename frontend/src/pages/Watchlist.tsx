@@ -302,6 +302,12 @@ function StockSearchBox({
                   >
                     <span className="font-mono shrink-0 w-[80px]">{r.symbol}</span>
                     <span className="truncate text-secondary flex-1">{r.name}</span>
+                    {r.region === 'HK' && (
+                      <span className="shrink-0 px-1 py-0.5 rounded text-[10px] leading-none bg-amber-500/15 text-amber-500">港</span>
+                    )}
+                    {r.region === 'US' && (
+                      <span className="shrink-0 px-1 py-0.5 rounded text-[10px] leading-none bg-sky-500/15 text-sky-400">US</span>
+                    )}
                     {r.asset_type === 'etf' && (
                       <span className="shrink-0 px-1 py-0.5 rounded text-[10px] leading-none bg-accent/10 text-accent">ETF</span>
                     )}
