@@ -82,9 +82,23 @@ def add_batch(req: BatchAddRequest, request: Request):
 
 @router.get("/ocr-status")
 def ocr_status():
-    """当前 OCR 引擎是否可用（前端可据此提示安装依赖）。"""
+    """当前可用 OCR 引擎 (AI 视觉 + Tesseract 双通道, 前端可据此提示)。"""
     provider = get_ocr_provider()
-    return {"provider": provider.name, "available": provider.available()}
+    ai_available = False
+    try:
+        from app.services.watchlist_ocr.ai_vision import AiVisionOcrProvider
+
+        ai_available = AiVisionOcrProvider().available()
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "provider": provider.name,
+        "available": provider.available() or ai_available,
+        "engines": {
+            "tesseract": provider.available(),
+            "ai_vision": ai_available,
+        },
+    }
 
 
 @router.post("/import-image")

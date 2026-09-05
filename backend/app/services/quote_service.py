@@ -888,7 +888,15 @@ class QuoteService:
 
     @staticmethod
     def _build_daily(records: list[dict]) -> pl.DataFrame:
-        """将 API records 转为日K格式 DataFrame (OHLCV + quote_ts, 写 kline_daily 用)。"""
+        """将 API records 转为日K格式 DataFrame (OHLCV + quote_ts, 写 kline_daily 用)。
+
+        港美股 (.HK/.US) 行情不落入 A股 kline_daily 分区, 避免污染选股 universe。
+        """
+        if not records:
+            return pl.DataFrame()
+        from app.markets import is_hk_or_us
+
+        records = [r for r in records if not is_hk_or_us(str(r.get("symbol") or ""))]
         if not records:
             return pl.DataFrame()
         df = pl.DataFrame(records)

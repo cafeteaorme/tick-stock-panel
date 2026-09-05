@@ -77,3 +77,34 @@ def trading_minutes_elapsed_from_ts(ts_ms: int | float | None) -> float:
         return float(_TRADING_TOTAL_MINUTES)
     return trading_minutes_elapsed_from_dt(dt)
 
+
+# ================================================================
+# 港股 / 美股交易时段 (用于前端「开市/闭市」显示)
+# ================================================================
+HK_TZ = timezone(timedelta(hours=8))
+# 简化: 固定美东 UTC-5; 夏令时期间相差 1 小时, 仅影响盘前状态提示精度
+US_EASTERN_TZ = timezone(timedelta(hours=-5))
+
+# 港股 (香港时间): 9:30-12:00 + 13:00-16:00
+_HK_SESSIONS = ((dt_time(9, 30), dt_time(12, 0)), (dt_time(13, 0), dt_time(16, 0)))
+# 美股 (美东): 9:30-16:00
+_US_SESSIONS = ((dt_time(9, 30), dt_time(16, 0)),)
+_CN_SESSIONS = ((_MORNING_START, _MORNING_END), (_AFTERNOON_START, _AFTERNOON_END))
+
+
+def _in_sessions(now_local: datetime, sessions) -> bool:
+    t = now_local.time()
+    return any(start <= t < end for start, end in sessions)
+
+
+def market_open_now(region: str) -> bool:
+    """指定市场当前是否处于常规交易时段。region: CN/HK/US (见 app.markets)。
+
+    仅按时钟判断, 不含节假日日历 — 节假日会误报「开市」, 前端仅用于状态提示。
+    """
+    if region == "HK":
+        return _in_sessions(datetime.now(HK_TZ), _HK_SESSIONS)
+    if region == "US":
+        return _in_sessions(datetime.now(US_EASTERN_TZ), _US_SESSIONS)
+    return _in_sessions(cn_now(), _CN_SESSIONS)
+

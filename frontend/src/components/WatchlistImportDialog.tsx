@@ -19,6 +19,25 @@ function isImageFile(file: File): boolean {
 }
 
 /** 按 code 合并多图 OCR 结果：优先保留已匹配项，已在自选取并集。 */
+const MARKET_LABEL: Record<string, string> = { CN: 'A股', HK: '港股', US: '美股' }
+
+function MarketTag({ market }: { market?: string }) {
+  if (!market || market === 'CN') return null
+  const label = MARKET_LABEL[market] ?? market
+  const cls =
+    market === 'HK'
+      ? 'bg-amber-500/15 text-amber-500'
+      : 'bg-sky-500/15 text-sky-400'
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${cls}`}>{label}</span>
+  )
+}
+
+function fmtQty(qty?: number | null): string {
+  if (qty == null) return ''
+  return qty >= 10000 ? `${(qty / 10000).toFixed(2)}万` : String(qty)
+}
+
 export function mergeImportCandidates(
   lists: WatchlistImportCandidate[][],
 ): WatchlistImportCandidate[] {
@@ -368,6 +387,7 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline gap-2">
+                              <MarketTag market={c.market} />
                               <span className="font-medium text-foreground truncate">
                                 {c.name || (c.matched ? c.symbol : '未匹配')}
                               </span>
@@ -376,6 +396,13 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
                                 {c.symbol ? ` · ${c.symbol}` : ''}
                               </span>
                             </div>
+                            {(c.qty != null || c.cost != null) && (
+                              <span className="text-[10px] text-muted tabular-nums">
+                                {c.qty != null && `持仓 ${fmtQty(c.qty)}`}
+                                {c.qty != null && c.cost != null && ' · '}
+                                {c.cost != null && `成本 ${c.cost}`}
+                              </span>
+                            )}
                             {c.already_in_watchlist && (
                               <span className="text-[10px] text-muted">已在自选</span>
                             )}

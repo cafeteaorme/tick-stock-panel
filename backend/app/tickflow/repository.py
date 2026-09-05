@@ -329,6 +329,8 @@ class KlineRepository:
         self._etf_symbol_set_cache: set[str] | None = None
         self._index_enriched_cache: pl.DataFrame | None = None
         self._index_enriched_cache_date: date | None = None
+        # 港美股标的字典 (instruments_hk/ + instruments_us/, 独立于 A股 universe)
+        self._hk_us_instruments_cache: pl.DataFrame | None = None
 
         # ---- enriched 后台预热 ----
         # 启动时 compute_indicators (107万行, 低配机 50s+) 移出 lifespan 关键路径,
@@ -351,6 +353,8 @@ class KlineRepository:
         self._inst_glob = str(store.data_dir / "instruments" / "**" / "*.parquet")
         self._index_inst_glob = str(store.data_dir / "instruments_index" / "**" / "*.parquet")
         self._etf_inst_glob = str(store.data_dir / "instruments_etf" / "**" / "*.parquet")
+        self._hk_us_inst_glob = str(store.data_dir / "instruments_hk" / "**" / "*.parquet")
+        self._us_inst_glob = str(store.data_dir / "instruments_us" / "**" / "*.parquet")
 
     def execute_all(self, sql: str, params: list | None = None) -> list[tuple]:
         """线程安全的 SELECT → fetchall。DuckDB 单 connection 非线程安全，所有读路径须走此方法。"""
@@ -1047,6 +1051,33 @@ class KlineRepository:
         except Exception as e:  # noqa: BLE001
             logger.warning("instruments 缓存刷新失败: %s", e)
 
+    def _refresh_hk_us_instruments(self) -> None:
+        """加载港美股标的字典到内存 (不存在时保持 None, 懒加载)。"""
+        try:
+            frames = [
+                pl.scan_parquet(g).collect()
+                for g in (self._hk_us_inst_glob, self._us_inst_glob)
+            ]
+            frames = [f for f in frames if not f.is_empty()]
+            if frames:
+                df = pl.concat(frames, how="diagonal_relaxed")
+                self._hk_us_instruments_cache = df
+                logger.info("hk/us instruments 缓存已加载: %d 只", len(df))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("hk/us instruments 缓存刷新跳过: %s", e)
+
+    def get_hk_us_instruments(self) -> pl.DataFrame:
+        """返回缓存的港美股 instruments (港股+美股合并)。"""
+        if self._hk_us_instruments_cache is None:
+            self._refresh_hk_us_instruments()
+        if self._hk_us_instruments_cache is None:
+            return pl.DataFrame()
+        return self._hk_us_instruments_cache
+
+    def invalidate_hk_us_instruments(self) -> None:
+        """港美股维表重新同步后调用, 触发下次懒加载。"""
+        self._hk_us_instruments_cache = None
+
     def _refresh_index_instruments(self) -> None:
         """加载指数 instruments 到内存。"""
         try:
@@ -1254,6 +1285,8 @@ class KlineRepository:
         """按资产类型返回 instruments；老 stock 路径保持原样。"""
         if asset_type == "stock":
             return self.get_instruments()
+        if asset_type == "hk_us_stock":
+            return self.get_hk_us_instruments()
         if asset_type == "index":
             df = self.get_index_instruments()
             if not df.is_empty() and "asset_type" in df.columns:
@@ -1282,15 +1315,20 @@ class KlineRepository:
         return self._etf_symbol_set_cache
 
     def resolve_asset_type(self, symbol: str) -> str:
-        """按 symbol 判定资产类型: etf / index / stock(默认)。
+        """按 symbol 判定资产类型: etf / index / hk_us_stock / stock(默认)。
 
         供 API 层对单标的查询做资产分流 (get_daily_asset 等)。
         ETF/指数集合为 memo, 每请求查询成本可忽略。
+        港美股 (.HK/.US) 独立分流: 不进入 A股 enriched 选股/回测 universe。
         """
         if symbol in self.get_etf_symbol_set():
             return "etf"
         if symbol in self.get_index_symbol_set():
             return "index"
+        from app.markets import is_hk_or_us
+
+        if is_hk_or_us(symbol):
+            return "hk_us_stock"
         return "stock"
 
     def get_name_map(self, symbols: list[str] | None = None) -> dict[str, str]:
@@ -1300,7 +1338,13 @@ class KlineRepository:
         symbols 非 None 时只返回命中的条目。
         """
         name_map: dict[str, str] = {}
-        for df in (self.get_instruments(), self.get_etf_instruments(), self.get_instruments_asset("index")):
+        sources = (
+            self.get_instruments(),
+            self.get_etf_instruments(),
+            self.get_instruments_asset("index"),
+            self.get_hk_us_instruments(),
+        )
+        for df in sources:
             if df.is_empty() or "symbol" not in df.columns or "name" not in df.columns:
                 continue
             if symbols is not None:
@@ -1422,7 +1466,7 @@ class KlineRepository:
         end: date,
         columns: list[str] | None = None,
     ) -> pl.DataFrame:
-        if asset_type == "stock":
+        if asset_type in ("stock", "hk_us_stock"):
             return self.get_daily(symbol, start, end, columns)
         if asset_type == "index":
             return self.get_index_daily(symbol, start, end, columns)
