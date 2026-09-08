@@ -638,6 +638,10 @@ def get_minute_batch(request: Request, body: dict):
 
     # Step 1: 本地优先 — 一次 scan 读全部 symbol 当日分钟K (股票 / ETF 分钟数据分开存储)
     etf_set = repo.get_etf_symbol_set()
+    # 港美股分钟走独立接口(腾讯), 此处剔除避免 TickFlow 分钟权限报错; 前端迷你图对港美股显示空
+    from app.markets import is_hk_or_us as _is_hku
+
+    symbols = [s for s in symbols if not _is_hku(s)]
     stock_syms = [s for s in symbols if s not in etf_set]
     etf_syms = [s for s in symbols if s in etf_set]
     df_local = repo.get_minute_batch(stock_syms, trade_date)
@@ -735,6 +739,38 @@ def get_minute(
     """
     repo = request.app.state.repo
     asset_type = repo.resolve_asset_type(symbol)
+
+    # 港美股分时: 腾讯免费接口 (TickFlow 分钟权限仅覆盖 A股)。
+    # 设置开关关闭 → 403 (功能整体休眠, 零请求); 只支持当日, 历史日返回本地已存数据。
+    from app.markets import HK, US, get_region
+
+    region = get_region(symbol)
+    if region in (HK, US):
+        from app.services import preferences
+        from app.services import hk_us_intraday
+
+        if not preferences.get_hk_us_intraday_enabled():
+            raise HTTPException(403, "港美股分时图未开启, 请在 设置 → 监控 中打开「港美股分时图」")
+
+        stock_info2 = _get_asset_info(repo, symbol, "hk_us_stock")
+        stock_name = stock_info2.get("name")
+        if trade_date is not None and str(trade_date) < hk_us_intraday.region_today(region):
+            stored = hk_us_intraday.load_intraday(repo.store.data_dir, symbol, str(trade_date))
+            return {
+                "symbol": symbol, "name": stock_name, "stock_info": stock_info2,
+                "date": str(trade_date), "rows": stored.to_dicts(),
+                "source": "local" if not stored.is_empty() else "none",
+                "asset_type": asset_type, "price_limit": None,
+            }
+        res = hk_us_intraday.get_intraday_for_api(
+            symbol, repo.store.data_dir, repo.store.data_dir / "user_data"
+        )
+        return {
+            "symbol": symbol, "name": stock_name, "stock_info": stock_info2,
+            "date": res["date"], "rows": res["rows"], "source": res["source"],
+            "asset_type": asset_type, "price_limit": None,
+        }
+
     stock_info = _get_stock_info(repo, symbol) if asset_type == "stock" else _get_asset_info(repo, symbol, asset_type)
     stock_name = stock_info.get("name")
 

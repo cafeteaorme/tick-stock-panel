@@ -1,8 +1,52 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Trash2, Download, Calendar } from 'lucide-react'
+import { Loader2, Trash2, Download, Calendar, Globe } from 'lucide-react'
 import { api } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
+
+/** 港美股分时图开关: 腾讯免费接口 (当日), 点击才加载; 当日已看的标的开市期间自动刷新。默认关。 */
+function HkUsIntradayToggle() {
+  const qc = useQueryClient()
+  const prefs = useQuery({ queryKey: QK.preferences, queryFn: api.preferences })
+  const update = useMutation({
+    mutationFn: (enabled: boolean) => api.updateHkUsIntraday(enabled),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QK.preferences }),
+  })
+  const enabled = prefs.data?.hk_us_intraday_enabled ?? false
+
+  return (
+    <div className="pt-3 border-t border-border space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Globe className="h-3 w-3 text-secondary" />
+          <span className="text-[11px] text-secondary font-medium">港美股分时图</span>
+          <span className="text-[10px] px-1 py-px rounded bg-sky-500/10 text-sky-400">免费接口</span>
+        </div>
+        <button
+          onClick={() => update.mutate(!enabled)}
+          disabled={update.isPending}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200 ${
+            enabled ? 'bg-accent shadow-[0_0_6px_rgba(61,214,140,0.3)]' : 'bg-elevated'
+          } ${update.isPending ? 'opacity-40' : 'cursor-pointer'}`}
+        >
+          {update.isPending ? (
+            <Loader2 className="h-3 w-3 mx-auto animate-spin text-muted" />
+          ) : (
+            <span
+              className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
+              }`}
+            />
+          )}
+        </button>
+      </div>
+      <div className="text-[10px] text-muted leading-relaxed">
+        开启后个股详情页出现「分时」入口（点击才加载数据，不点不请求）。数据来自腾讯免费行情接口（无需
+        TickFlow 分钟权限），仅当日；当日查看过的标的会在其开市时段每分钟自动刷新并落盘本地。
+      </div>
+    </div>
+  )
+}
 
 export function MinuteSyncConfig({ caps, onJobStart }: { caps: { label: string; capabilities: Record<string, { rpm: number | null; batch: number | null; subscribe: number | null }> } | undefined; onJobStart?: (jobId: string) => void }) {
   const qc = useQueryClient()
@@ -182,6 +226,9 @@ export function MinuteSyncConfig({ caps, onJobStart }: { caps: { label: string; 
           均按上方「分段大小」分段拉取、每段即落盘
         </div>
       </div>
+
+      {/* 区块 D: 港美股分时图 (腾讯免费接口, 点击加载 + 当日已看后台刷新) */}
+      <HkUsIntradayToggle />
 
       {/* 区块 C: 清空 (危险操作, 独立分隔) */}
       <button

@@ -90,6 +90,11 @@ def get_minute_sync_enabled() -> bool:
     return load().get("minute_sync_enabled", False)
 
 
+def get_hk_us_intraday_enabled() -> bool:
+    """港美股分时图 (腾讯免费接口, 点击加载 + 当日已看后台刷新) 是否开启。默认关。"""
+    return load().get("hk_us_intraday_enabled", False)
+
+
 def get_minute_intraday_refresh() -> bool:
     """自选列表分时图是否跟随实时行情刷新。
 

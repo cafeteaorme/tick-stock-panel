@@ -139,6 +139,14 @@ async def lifespan(app: FastAPI):
     financial_scheduler.start(store.data_dir, capset)
     app.state.financial_scheduler = financial_scheduler
 
+    # 港美股分时后台刷新: 「当日已查看」的标的在其市场开市时段内自动续拉 (腾讯免费接口)。
+    # 设置开关关闭时 refresh_viewed_once 直接返回, 零请求。
+    try:
+        from app.services import hk_us_intraday
+        hk_us_intraday.start_background_refresh(store.data_dir, store.data_dir / "user_data")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("hk_us_intraday refresh start failed: %s", e)
+
     # 策略引擎
     from app.strategy.engine import StrategyEngine
     from app.strategy.monitor import StrategyMonitorService

@@ -28,11 +28,16 @@ export function StockIntradayChart({
   const qc = useQueryClient()
   const [minuteDismissed, setMinuteDismissed] = useState(false)
 
+  // 港美股分时走腾讯免费接口 (当日); A股走本地分钟K + TickFlow
+  const region: 'CN' | 'HK' | 'US' = symbol.endsWith('.HK') ? 'HK' : symbol.endsWith('.US') ? 'US' : 'CN'
+  const isHkUs = region !== 'CN'
+
   const minute = useQuery({
     queryKey: QK.klineMinute(symbol, date ?? ''),
     queryFn: () => api.klineMinute(symbol, date ?? undefined),
     enabled: !!symbol && !!date,
-    refetchInterval: refetchIntervalMs,
+    // 港美股: 已有数据时 60s 轮询 (后台也在刷新本地, 命中本地低延迟); A股沿用外部传入
+    refetchInterval: refetchIntervalMs ?? (isHkUs ? 60_000 : undefined),
   })
 
   const fetchMinute = useMutation({
@@ -67,6 +72,17 @@ export function StockIntradayChart({
             <div className="flex items-center justify-center h-full gap-2 text-xs text-accent">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               <span>正在获取分钟K数据…</span>
+            </div>
+          ) : isHkUs ? (
+            // 港美股: 腾讯免费分时仅提供当日, 无 5 日分钟K同步入口
+            <div className="flex flex-col items-center justify-center h-full gap-3">
+              <div className="text-xs text-muted">当日暂无分时数据（休市、未开盘或数据源未提供）</div>
+              <button
+                onClick={() => minute.refetch()}
+                className="px-4 py-1.5 rounded-btn bg-elevated text-secondary text-xs font-medium hover:bg-elevated/80 transition-colors duration-150"
+              >
+                重新获取
+              </button>
             </div>
           ) : isIndex ? (
             // 指数: 分钟K仅支持实时读取, 无落库获取入口
@@ -121,6 +137,7 @@ export function StockIntradayChart({
           date={date}
           priceLimit={minute.data?.price_limit ?? undefined}
           onPriceHover={onPriceHover}
+          region={region}
         />
       )}
     </div>

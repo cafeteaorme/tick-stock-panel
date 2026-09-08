@@ -889,6 +889,8 @@ export interface Preferences {
   minute_sync_enabled: boolean
   minute_sync_days: number
   minute_sync_segment_days: number
+  /** 港美股分时图 (腾讯免费接口, 点击加载 + 当日已看后台刷新), 默认关 */
+  hk_us_intraday_enabled: boolean
   daily_data_provider?: string
   adj_factor_provider?: string
   minute_data_provider?: string
@@ -1056,6 +1058,12 @@ export const api = {
         minute_sync_days: days,
         ...(segmentDays != null ? { minute_sync_segment_days: segmentDays } : {}),
       }),
+    }),
+  /** 港美股分时图开关 (腾讯免费接口, 点击加载 + 当日已看后台刷新) */
+  updateHkUsIntraday: (enabled: boolean) =>
+    request<{ hk_us_intraday_enabled: boolean }>('/api/settings/preferences/hk-us-intraday', {
+      method: 'PUT',
+      body: JSON.stringify({ hk_us_intraday_enabled: enabled }),
     }),
   updatePipelinePullTypes: (cfg: Partial<Pick<Preferences, 'pipeline_pull_a_share' | 'pipeline_pull_etf' | 'pipeline_pull_index'>>) =>
     request<{

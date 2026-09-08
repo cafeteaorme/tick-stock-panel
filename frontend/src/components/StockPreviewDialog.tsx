@@ -89,6 +89,9 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
   const intradayRefetchMs = (intradayRefreshOn && realtimeRunning)
     ? (prefs?.minute_intraday_refresh_interval ?? 6) * 1000
     : undefined
+  // 港美股分时入口需「港美股分时图」设置开关; A股不受限
+  const isHkUs = !!(symbol?.endsWith('.HK') || symbol?.endsWith('.US'))
+  const hkUsIntradayAllowed = !isHkUs || !!prefs?.hk_us_intraday_enabled
 
   const handleRefresh = () => {
     if (!symbol) return
@@ -176,18 +179,20 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
 
                 <span className="text-muted/20 mx-0.5">|</span>
 
-                {/* 分时开关 */}
-                <button
-                  onClick={() => setShowIntraday((v) => !v)}
-                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
-                    showIntraday
-                      ? 'bg-accent/15 text-accent border border-accent/30'
-                      : 'bg-elevated text-secondary border border-border hover:border-accent/30'
-                  }`}
-                >
-                  <Clock className="h-3 w-3" />
-                  分时
-                </button>
+                {/* 分时开关。港美股分时依赖「港美股分时图」设置开关 (腾讯免费接口, 点击才加载), 未开启时不显示入口 */}
+                {hkUsIntradayAllowed ? (
+                  <button
+                    onClick={() => setShowIntraday((v) => !v)}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs transition-colors ${
+                      showIntraday
+                        ? 'bg-accent/15 text-accent border border-accent/30'
+                        : 'bg-elevated text-secondary border border-border hover:border-accent/30'
+                    }`}
+                  >
+                    <Clock className="h-3 w-3" />
+                    分时
+                  </button>
+                ) : null}
 
                 <span className="text-muted/20 mx-0.5">|</span>
 
@@ -257,7 +262,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
                 symbol={symbol}
                 height={420}
                 showIntraday={showIntraday}
-                onSelectDate={() => { if (!showIntraday) setShowIntraday(true) }}
+                onSelectDate={() => { if (!showIntraday && hkUsIntradayAllowed) setShowIntraday(true) }}
                 dateRange={dateRange}
                 onMonitor={() => setShowMonitorEditor(true)}
                 inWatchlist={inWatchlist}

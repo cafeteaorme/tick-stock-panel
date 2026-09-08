@@ -408,6 +408,7 @@ def get_preferences() -> dict:
         "minute_sync_enabled": preferences.get_minute_sync_enabled(),
         "minute_sync_days": preferences.get_minute_sync_days(),
         "minute_sync_segment_days": preferences.get_minute_sync_segment_days(),
+        "hk_us_intraday_enabled": preferences.get_hk_us_intraday_enabled(),
         "daily_data_provider": preferences.get_daily_data_provider(),
         "adj_factor_provider": preferences.get_adj_factor_provider(),
         "minute_data_provider": preferences.get_minute_data_provider(),
@@ -692,6 +693,19 @@ def update_minute_sync(req: MinuteSyncPrefs) -> dict:
         "minute_sync_days": days,
         "minute_sync_segment_days": preferences.get_minute_sync_segment_days(),
     }
+
+
+class HkUsIntradayPrefs(BaseModel):
+    hk_us_intraday_enabled: bool
+
+
+@router.put("/preferences/hk-us-intraday")
+def update_hk_us_intraday(req: HkUsIntradayPrefs) -> dict:
+    """保存港美股分时图开关 (腾讯免费接口; 开启后点击才加载, 当日已看后台自动刷新)。"""
+    from app.services import preferences
+
+    preferences.save({"hk_us_intraday_enabled": req.hk_us_intraday_enabled})
+    return {"hk_us_intraday_enabled": req.hk_us_intraday_enabled}
 
 
 class RealtimeQuotesPrefs(BaseModel):
