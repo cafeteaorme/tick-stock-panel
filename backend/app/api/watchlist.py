@@ -266,8 +266,54 @@ def watchlist_enriched(
         pl.col("symbol").replace_strict(asset_map, default="stock", return_dtype=pl.Utf8).alias("asset_type")
     )
 
+    # 港美股: enriched 缓存仅覆盖 A股, 现价/涨跌幅等改由实时行情填充
+    # (TickFlow quotes 完整支持 .HK/.US: last_price/change_pct/change_amount/amplitude/turnover_rate)
+    from app.markets import get_region, is_hk_or_us
+
+    hk_us_symbols = [s for s in stock_symbols if is_hk_or_us(s)]
+    if hk_us_symbols:
+        capset = getattr(request.app.state, "capabilities", None)
+        qrows: list[dict] = []
+        if capset is not None:
+            try:
+                qrows = watchlist.fetch_quotes(hk_us_symbols, capset)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("hk/us watchlist quotes failed: %s", e)
+        if qrows:
+            q_df = pl.DataFrame(
+                {
+                    "symbol": [r.get("symbol") for r in qrows],
+                    "close_q": [r.get("price") for r in qrows],
+                    "change_pct_q": [r.get("pct") for r in qrows],
+                    "change_amount_q": [r.get("ext.change_amount") for r in qrows],
+                    "amount_q": [r.get("amount") for r in qrows],
+                    "amplitude_q": [r.get("ext.amplitude") for r in qrows],
+                    "turnover_rate_q": [r.get("ext.turnover_rate") for r in qrows],
+                }
+            ).unique(subset="symbol", keep="last")
+            df = df.join(q_df, on="symbol", how="left")
+            # q 列仅港美股行非空, 直接 coalesce 覆盖 (A股行保持 enriched 原值)
+            for base, qcol in (
+                ("close", "close_q"), ("change_pct", "change_pct_q"),
+                ("change_amount", "change_amount_q"), ("amount", "amount_q"),
+                ("amplitude", "amplitude_q"), ("turnover_rate", "turnover_rate_q"),
+            ):
+                if qcol not in df.columns:
+                    continue
+                if base in df.columns:
+                    df = df.with_columns(pl.coalesce(pl.col(qcol), pl.col(base)).alias(base)).drop(qcol)
+                else:
+                    df = df.rename({qcol: base})
+        df = df.with_columns(
+            pl.col("symbol").map_elements(get_region, return_dtype=pl.Utf8).alias("region")
+        )
+
     # 选择内置需要的列
-    keep = [c for c in _WATCHLIST_COLS + ["name", "float_shares", "asset_type"] if c in df.columns]
+    keep = [
+        c
+        for c in _WATCHLIST_COLS + ["name", "float_shares", "asset_type", "region"]
+        if c in df.columns
+    ]
     df = df.select(keep)
 
     # 动态 JOIN 扩展数据表

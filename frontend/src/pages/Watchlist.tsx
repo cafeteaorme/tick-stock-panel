@@ -1274,6 +1274,7 @@ export function Watchlist() {
                 // 自选页 symbol 列：预览 + 内嵌删除（减号图标，二次确认）
                 if (key === 'symbol') {
                   const board = boardTag(r.symbol)
+                  const region = r.region ?? (r.symbol.endsWith('.HK') ? 'HK' : r.symbol.endsWith('.US') ? 'US' : 'CN')
                   return (
                     <td className="px-1.5 py-1.5">
                       <div className="flex items-center gap-1 w-full">
@@ -1295,6 +1296,12 @@ export function Watchlist() {
                               {board.label}
                             </span>
                           ) : null}
+                          {region === 'HK' && (
+                            <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border border-amber-500/25 bg-amber-500/12 text-amber-500">港</span>
+                          )}
+                          {region === 'US' && (
+                            <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border border-sky-500/25 bg-sky-500/12 text-sky-400">US</span>
+                          )}
                           {monitoredSymbols.has(r.symbol) && <span className="ml-2"><RealtimeDot /></span>}
                         </button>
                         {/* 删除入口：默认减号图标，二次确认时替换为确定按钮 */}
