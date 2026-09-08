@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import __version__
+from app import __version__, branch_version
 from app.api import analysis, auth as auth_api, backtest, data, ext_data, financials, indices, intraday, kline, market_recap, monitor_rules, alerts, overview, pipeline, rps, screener, settings as settings_api, signals, stock_analysis, strategy, watchlist
 from app.api.routes import router as core_router
 from app.config import settings
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info(
         "TickFlow Stock Panel v%s starting (mode=%s)",
-        __version__, tf_client.current_mode(),
+        branch_version(), tf_client.current_mode(),
     )
 
     # 首次启动: 若配置了 AUTH_PASSWORD 环境变量且未设过密码, 用它初始化。
@@ -271,7 +271,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TickFlow Stock Panel",
-    version=__version__,
+    version=branch_version(),
     description="A 股选股 + 回测面板 — TickFlow 适配",
     lifespan=lifespan,
 )

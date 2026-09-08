@@ -821,15 +821,15 @@ def table_schema(request: Request, table: str) -> list[dict]:
 def get_version(request: Request) -> dict:
     """返回当前项目版本号。
 
-    优先读 app.__version__ (与 /health 接口同源, 唯一权威版本),
-    回退到项目根 VERSION 文件, 最后兜底 v0.0.0。
+    version = 分支版本 (上游版本-修订序号, 如 v0.1.88-0.02),
+    upstream_version 为上游原始版本。回退到项目根 VERSION 文件, 最后兜底 v0.0.0。
     """
-    from app import __version__
+    from app import __version__, branch_version
 
-    # 1. 优先用 app.__version__ (唯一权威版本, 打包期由 PyInstaller 注入)
+    # 1. 优先用 app.branch_version (与 /health 接口同源, 唯一权威版本)
     if __version__:
-        v = __version__.strip()
-        return {"version": v if v.startswith("v") else f"v{v}"}
+        v = branch_version().strip()
+        return {"version": v if v.startswith("v") else f"v{v}", "upstream_version": __version__}
 
     # 2. 回退到项目根 VERSION 文件
     from app.config import settings

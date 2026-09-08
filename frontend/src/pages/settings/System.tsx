@@ -327,7 +327,9 @@ export function SettingsSystemPanel() {
         <div className="flex items-center justify-between gap-4 py-2">
           <div className="min-w-0">
             <div className="text-sm text-foreground">版本</div>
-            <div className="text-[11px] text-muted truncate">当前安装的应用版本</div>
+            <div className="text-[11px] text-muted truncate">
+              分支版本{versionData?.upstream_version ? `（上游 ${versionData.upstream_version}）` : ''}
+            </div>
           </div>
           <span className="font-mono text-xs text-secondary shrink-0">
             {versionData?.version ?? '—'}
@@ -340,7 +342,7 @@ export function SettingsSystemPanel() {
             <div className="text-[11px] text-muted truncate">前往 GitHub Releases 下载最新版本</div>
           </div>
           <a
-            href="https://github.com/shy3130/tickflow-stock-panel/releases/latest"
+            href="https://github.com/cafeteaorme/tick-stock-panel/releases/latest"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-btn text-xs

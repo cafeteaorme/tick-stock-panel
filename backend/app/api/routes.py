@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app import __version__
+from app import __version__, branch_version
 from app.tickflow import client as tf_client
 from app.tickflow.policy import detect_capabilities, tier_label
 
@@ -14,7 +14,9 @@ router = APIRouter()
 def health() -> dict:
     return {
         "status": "ok",
-        "version": __version__,
+        # 展示版本 = 分支版本 (上游版本-修订序号, 如 0.1.88-0.02); 上游原始版本见 upstream_version
+        "version": branch_version(),
+        "upstream_version": __version__,
         # 三态: none(无key/无效) / free(免费key) / api_key(付费档)
         "mode": tf_client.current_mode(),
     }

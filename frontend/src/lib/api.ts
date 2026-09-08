@@ -1270,7 +1270,7 @@ export const api = {
     }),
 
   capabilities: () => request<CapabilitiesResponse>('/api/capabilities'),
-  version: () => request<{ version: string }>('/api/data/version'),
+  version: () => request<{ version: string; upstream_version?: string }>('/api/data/version'),
   redetectCapabilities: () =>
     request<CapabilitiesResponse>('/api/capabilities/redetect', { method: 'POST' }),
 
