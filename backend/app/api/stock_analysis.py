@@ -124,6 +124,14 @@ def get_levels(
     # 按资产类型分流: ETF/指数走独立 enriched 存储, 股票保持原路径
     df = repo.get_daily_asset(repo.resolve_asset_type(symbol), symbol, start, end)
     if df.is_empty():
+        # 港美股不在 A股 enriched 缓存内 → 实时拉取 + 现算指标兜底
+        from app.markets import is_hk_or_us
+
+        if is_hk_or_us(symbol):
+            from app.services.kline_sync import fetch_hk_us_daily_with_indicators
+
+            df = fetch_hk_us_daily_with_indicators(symbol, days=days)
+    if df.is_empty():
         return {"levels": {"sr": [], "pivot": [], "extreme": [],
                            "boll": [], "keltner_s": [], "keltner_m": [], "keltner_l": [],
                            "atr_stop": [], "gap": [], "fib": [], "round": []},

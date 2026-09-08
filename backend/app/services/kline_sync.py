@@ -1111,3 +1111,25 @@ def sync_and_persist_minute(
 
     logger.info("minute K synced: %d rows (%d symbols)", written, len(symbols))
     return written
+
+
+def fetch_hk_us_daily_with_indicators(symbol: str, days: int = 250) -> pl.DataFrame:
+    """港美股日K实时拉取 + 本地指标计算 (个股分析等无缓存场景的兜底)。
+
+    enriched 缓存仅覆盖 A股; .HK/.US 标的走单只 klines.get (sync_daily_batch 内分流),
+    再用与 /api/kline/daily 相同的 compute_enriched 算指标 (港美股无涨跌停 → 连板归零)。
+    复权因子: ex_factors 对港美股未验证, 直接退回未复权 (与 Free 档 A股行为一致)。
+    """
+    from app.indicators.pipeline import compute_enriched
+    from app.markets import is_hk_or_us
+
+    if not is_hk_or_us(symbol):
+        return pl.DataFrame()
+    raw = sync_daily_batch([symbol], count=max(days, 30))
+    if raw.is_empty():
+        return pl.DataFrame()
+    try:
+        return compute_enriched(raw, factors=pl.DataFrame())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("hk/us enrich failed %s: %s", symbol, e)
+        return raw

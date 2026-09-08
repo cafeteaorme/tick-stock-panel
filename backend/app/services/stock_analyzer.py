@@ -48,7 +48,15 @@ def _load_kline(repo, symbol: str) -> pl.DataFrame:
     # 按资产类型分流: ETF/指数走独立 enriched 存储 (无财务数据, 提示词已有兜底)
     df = repo.get_daily_asset(repo.resolve_asset_type(symbol), symbol, start, end)
     if df.is_empty():
-        return df
+        # 港美股不在 A股 enriched 缓存内 → 实时拉取 + 现算指标兜底
+        from app.markets import is_hk_or_us
+
+        if is_hk_or_us(symbol):
+            from app.services.kline_sync import fetch_hk_us_daily_with_indicators
+
+            df = fetch_hk_us_daily_with_indicators(symbol, days=_KLINE_WINDOW)
+        if df.is_empty():
+            return df
     return df.tail(_KLINE_WINDOW)
 
 
