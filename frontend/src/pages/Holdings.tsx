@@ -121,13 +121,13 @@ function SummaryCard({ s, spark, onSetCap }: {
   }
   return (
     <div className="rounded-card border border-border bg-surface p-5 md:p-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="grid grid-cols-2 gap-6">
         <div>
-          <div className="text-xs text-muted">总资产</div>
-          <div className="text-3xl md:text-4xl font-bold text-foreground tabular-nums mt-1.5 tracking-tight">{fmtMoney(s.total_asset)}</div>
+          <div className="text-xs text-muted">总资产{ s.initial_cap ? <span className="ml-1">（本金 {fmtMoney(s.initial_cap, 0)}）</span> : null }</div>
+          <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-1.5 tracking-tight ${pnlColor(s.cum_pnl)}`}>{fmtMoney(s.total_asset)}</div>
         </div>
-        <div className="md:ml-10">
-          <div className="text-xs text-muted">累计盈亏<span className="ml-1">（本金-总资产）</span></div>
+        <div>
+          <div className="text-xs text-muted">累计盈亏<span className="ml-1">（总资产-本金）</span></div>
           {editingCap ? (
             <div className="flex items-center gap-1.5 mt-1">
               <input autoFocus type="number" step="any" value={capInput} onChange={e => setCapInput(e.target.value)}
@@ -174,7 +174,12 @@ function SummaryCard({ s, spark, onSetCap }: {
         <div>
           <div className="text-xs text-muted">持仓市值 / 仓位</div>
           <div className="text-lg font-bold text-foreground tabular-nums mt-1">{fmtMoney(s.total_market_value)}</div>
-          <div className="text-sm text-secondary tabular-nums">{s.position_pct != null ? `${(s.position_pct * 100).toFixed(1)}%` : '—'}</div>
+          <div className="flex items-center gap-1.5 mt-1">
+            <div className="w-20 h-1.5 rounded-full bg-elevated overflow-hidden">
+              <div className="h-full rounded-full bg-accent/70" style={{ width: `${Math.min((s.position_pct ?? 0) * 100, 100)}%` }} />
+            </div>
+            <span className="text-xs text-secondary tabular-nums">{s.position_pct != null ? `${(s.position_pct * 100).toFixed(1)}%` : '—'}</span>
+          </div>
         </div>
         <div>
           <div className="text-xs text-muted">可用资金 / 持仓数</div>
@@ -247,8 +252,9 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
             disabled={!c.date || c.pnl == null}
             onClick={() => c.date && c.pnl != null && onPickDay(c.date)}
             title={c.date && c.pnl != null ? `${c.date} · ${fmtMoney(c.pnl)}（点击查看明细）` : ''}
+            style={{ background: c.date && c.pnl != null ? bg(c.pnl) : undefined }}
             className={`aspect-square rounded-md flex flex-col items-center justify-center transition-transform
-              ${c.date ? bg(c.pnl) : 'opacity-0'}
+              ${c.date ? 'bg-elevated/40' : 'opacity-0'}
               ${c.pnl != null ? 'text-white hover:scale-105 cursor-pointer' : 'text-muted cursor-default'}`}
           >
             {c.date && <span className={`text-[10px] tabular-nums ${c.pnl != null ? 'opacity-80' : ''}`}>{Number(c.date.slice(8))}</span>}
@@ -1408,6 +1414,7 @@ export function Holdings() {
     enabled: !!activeAcc,
     placeholderData: (prev) => prev,
     retry: 1,
+    refetchInterval: 60_000,
   })
   const closedQ = useQuery({
     queryKey: [...QK.holdings, 'closed', activeAcc],
@@ -1420,6 +1427,7 @@ export function Holdings() {
     enabled: !!activeAcc,
     placeholderData: (prev) => prev,
     retry: 1,
+    refetchInterval: 60_000,
   })
   const pnl = useQuery({
     queryKey: [...QK.holdingsPnl(`${year}-01-01`), activeAcc],
@@ -1727,14 +1735,7 @@ export function Holdings() {
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-14 h-1.5 rounded-full bg-elevated overflow-hidden">
-                            <div className="h-full rounded-full bg-accent/70" style={{ width: `${Math.min((r.position_rate ?? 0) * 100, 100)}%` }} />
-                          </div>
-                          <span className="text-[11px] tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</span>
-                        </div>
-                      </td>
+                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <button onClick={() => setEditing(r)} className="p-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated" title="编辑/卖出"><Pencil className="h-3.5 w-3.5" /></button>
