@@ -122,7 +122,19 @@ def resolve_account(account_id: str | None) -> str:
     return DEFAULT_ACCOUNT
 
 
+def find_account_by_name(name: str) -> str | None:
+    obj = list_accounts()
+    for a in obj["accounts"]:
+        if a["name"] == name:
+            return a["id"]
+    return None
+
+
 def create_account(name: str) -> dict[str, Any]:
+    # 同名账户复用同一 id (投资账本同步按名称落地, 避免反复同步产生重复账户)
+    existing = find_account_by_name(name)
+    if existing:
+        return {"id": existing, "name": name, "created_at": ""}
     obj = list_accounts()
     account_id = f"acc_{int(datetime.utcnow().timestamp() * 1000)}"
     acc = {"id": account_id, "name": name or f"账户{len(obj['accounts']) + 1}",

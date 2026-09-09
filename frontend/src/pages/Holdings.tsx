@@ -31,8 +31,7 @@ function fmtMoney(v: number | null | undefined, digits = 2): string {
   if (v == null || !Number.isFinite(v)) return '—'
   const sign = v < 0 ? '-' : ''
   const abs = Math.abs(v)
-  if (abs >= 1_0000_0000) return `${sign}${(abs / 1_0000_0000).toFixed(2)}亿`
-  if (abs >= 1_0000) return `${sign}${(abs / 1_0000).toFixed(2)}万`
+  // 不做万/亿缩写, 完整数字 + 千分位
   return `${sign}${abs.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 }
 
@@ -549,7 +548,7 @@ function ShotSummaryBlock({
   )
 }
 
-function HoldingsSettingsDialog({ accountId, accountName, onClose }: { accountId: string; accountName: string; onClose: () => void }) {
+function HoldingsSettingsDialog({ accountId, onClose }: { accountId: string; onClose: () => void }) {
   const qc = useQueryClient()
   const settings = useQuery({ queryKey: ['holdings-settings'], queryFn: api.holdingsSettings })
   const [hkRate, setHkRate] = useState('')
@@ -652,7 +651,7 @@ function HoldingsSettingsDialog({ accountId, accountName, onClose }: { accountId
             {!confirmReset ? (
               <button onClick={() => setConfirmReset(true)}
                 className="w-full h-8 rounded-btn border border-danger/30 text-danger/80 text-xs hover:bg-danger/10">
-                重置「{accountName}」账户数据（持仓+快照+资金）
+                重置投资账本数据（清除 Cookie + 账本同步的全部账户）
               </button>
             ) : (
               <div className="flex gap-2">
@@ -1309,7 +1308,12 @@ export function Holdings() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
   // 账户
-  const accountsQ = useQuery({ queryKey: ['holdings-accounts'], queryFn: api.holdingsAccounts })
+  const accountsQ = useQuery({
+    queryKey: ['holdings-accounts'],
+    queryFn: api.holdingsAccounts,
+    placeholderData: (prev) => prev,
+    retry: 1,
+  })
   const [activeAcc, setActiveAcc] = useState<string>('')
   const accounts = accountsQ.data?.accounts ?? []
   useEffect(() => {
@@ -1325,15 +1329,20 @@ export function Holdings() {
   const holdings = useQuery({
     queryKey: [...QK.holdings, activeAcc], queryFn: () => api.holdingsList(false, activeAcc || undefined),
     enabled: !!activeAcc,
+    placeholderData: (prev) => prev,
+    retry: 1,
   })
   const summary = useQuery({
     queryKey: [...QK.holdingsSummary, activeAcc], queryFn: () => api.holdingsSummary(activeAcc || undefined),
     enabled: !!activeAcc,
+    placeholderData: (prev) => prev,
+    retry: 1,
   })
   const pnl = useQuery({
     queryKey: [...QK.holdingsPnl(`${year}-01-01`), activeAcc],
     queryFn: () => api.holdingsPnl(`${year}-01-01`, undefined, activeAcc || undefined),
     enabled: !!activeAcc,
+    placeholderData: (prev) => prev,
   })
   const benchmark = useQuery({
     queryKey: ['holdings-benchmark', year, activeAcc],
@@ -1380,7 +1389,6 @@ export function Holdings() {
     qc.invalidateQueries({ queryKey: QK.holdings })
     qc.invalidateQueries({ queryKey: QK.holdingsSummary })
     qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
-    qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
   }
 
   const remove = useMutation({
@@ -1731,7 +1739,6 @@ export function Holdings() {
       {showSettings && summary?.data && (
         <HoldingsSettingsDialog
           accountId={activeAcc}
-          accountName={accounts.find(a => a.id === activeAcc)?.name || activeAcc}
           onClose={() => setShowSettings(false)}
         />
       )}

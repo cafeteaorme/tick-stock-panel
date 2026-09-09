@@ -359,11 +359,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
             continue
         raw_name = (b.get("brokername") or b.get("manualname") or fund_key).strip()
         # 本地账户: 按名称匹配, 无则创建
-        acc_obj = holdings_svc.list_accounts()
-        acc_id = next((a["id"] for a in acc_obj["accounts"] if a["name"] == raw_name), None)
-        if acc_id is None:
-            acc = holdings_svc.create_account(raw_name)
-            acc_id = acc["id"]
+        acc_id = holdings_svc.find_account_by_name(raw_name) or holdings_svc.create_account(raw_name)["id"]
 
         pos_raw = _api("/caishen_fund/pc/asset/v1/stock_position", cookie,
                        {"fund_key": fund_key, "type": "common"})
