@@ -194,6 +194,9 @@ def _enrich_rows(rows: list[dict], rates: dict, name_map: dict[str, str] | None 
         market_value = price * qty * fx if price is not None else None
         cost_cny = cost * fx if cost else 0.0
         float_pnl = (price * fx - cost_cny) * qty if (price is not None and cost_cny) else None
+        day_pnl = None
+        if market_value is not None and pct is not None and (1 + pct) != 0:
+            day_pnl = market_value - market_value / (1 + pct)
         hold_days = _fin(r.get("hold_days"))
         out.append({
             **r,
@@ -205,8 +208,8 @@ def _enrich_rows(rows: list[dict], rates: dict, name_map: dict[str, str] | None 
             "market_value": _fin(market_value),
             "float_pnl": _fin(float_pnl),
             "float_pnl_pct": _fin(((price * fx - cost_cny) / cost_cny) if (price is not None and cost_cny) else None),
-            "day_pnl": r.get("pre_profit"),
-            "day_pnl_pct": r.get("pre_rate"),
+            "day_pnl": _fin(day_pnl),
+            "day_pnl_pct": _fin(pct),
             "m1_rate": m1, "m3_rate": m3, "m6_rate": m6, "m12_rate": m12,
             "position_rate": _fin(r.get("position_rate")),
             "hold_days": hold_days,
@@ -226,7 +229,10 @@ def accounts(request: Request):
     for a in obj["accounts"]:
         acc_id = a["id"]
         rows = holdings_service.list_all(acc_id)
-        enriched = _enrich_rows(rows, rates)
+        symbols = [r["symbol"] for r in rows]
+        enriched = _enrich_rows(rows, rates,
+                                request.app.state.repo.get_name_map(symbols),
+                                _market_rows(request, symbols, rates))
         day_pnl = sum(r["day_pnl"] or 0 for r in enriched)
         market_value = sum(r["market_value"] or 0 for r in enriched)
         port = holdings_service.get_portfolio(acc_id)

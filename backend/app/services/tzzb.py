@@ -595,7 +595,16 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
                 "m6_rate": _f(p.get("m6_rate")),
                 "m12_rate": _f(p.get("m12_rate")),
             }
-            holdings_svc.upsert(acc_id, symbol, qty, qty, cost, extras)
+            if qty > 0:
+                holdings_svc.upsert(acc_id, symbol, qty, qty, cost, extras)
+            else:
+                # 已清仓 (数量 0): 记为 closed, 保留成本与已实现盈亏未知
+                h = holdings_svc.get(acc_id, symbol)
+                if h:  # 本地原持有 → 转清仓
+                    holdings_svc.sell(acc_id, symbol, _f(p.get("price")) or _f(cost) or 0)
+                else:
+                    holdings_svc.upsert(acc_id, symbol, 0, 0, cost,
+                                        {"status": "closed", "closed_at": datetime.utcnow().isoformat(timespec="seconds")})
             if symbol not in {r["symbol"] for r in wl.list_symbols()}:
                 wl.add(symbol)
             holdings_rows.append({"symbol": symbol, "qty": qty, "available": qty,

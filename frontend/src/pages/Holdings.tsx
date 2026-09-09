@@ -62,20 +62,6 @@ function todayIso(): string {
  * 迷你资产曲线 (svg sparkline)
  * ================================================================ */
 
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return null
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const range = max - min || 1
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * 100},${28 - ((v - min) / range) * 26}`).join(' ')
-  const up = values[values.length - 1] >= values[0]
-  return (
-    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-28 h-7 ml-auto" aria-hidden>
-      <polyline points={pts} fill="none" stroke={up ? '#ef4444' : '#22c55e'} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
-    </svg>
-  )
-}
-
 /* ================================================================
  * 汇总卡 (字体放大 + 金额/百分比红绿)
  * ================================================================ */
@@ -108,9 +94,8 @@ function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => voi
   )
 }
 
-function SummaryCard({ s, spark, onSetCap }: {
+function SummaryCard({ s, onSetCap }: {
   s: HoldingsSummary
-  spark: number[]
   onSetCap: (v: number) => void
 }) {
   const [editingCap, setEditingCap] = useState(false)
@@ -153,12 +138,6 @@ function SummaryCard({ s, spark, onSetCap }: {
             )}
           </div>
         </div>
-        {spark.length >= 2 && (
-          <div className="text-right md:ml-auto">
-            <div className="text-[10px] text-muted mb-0.5">近30日</div>
-            <Sparkline values={spark} />
-          </div>
-        )}
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
         <div>
@@ -1491,7 +1470,6 @@ export function Holdings() {
   }, [holdings.data, sortKey, sortDir])
 
   const s = summary.data
-  const spark = (pnl.data?.daily ?? []).slice(-30).map(r => r.asset)
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: QK.holdings })
@@ -1688,7 +1666,7 @@ export function Holdings() {
         {!s && !summary.isLoading && !holdings.isLoading && (
           <LoadingSkeleton height={140} />
         )}
-        {s && <SummaryCard s={s} spark={spark} onSetCap={(v) => {
+        {s && <SummaryCard s={s} onSetCap={(v) => {
           api.holdingsPortfolio({ initial_cap: v }).then(() => {
             qc.invalidateQueries({ queryKey: QK.holdingsSummary })
             qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
@@ -1710,7 +1688,7 @@ export function Holdings() {
                 列显示
               </button>
               {showColMenu && (
-                <div className="absolute right-0 top-full mt-1 z-20 w-40 rounded-btn border border-border bg-surface shadow-xl p-2 space-y-1">
+                <div className="absolute right-0 top-full mt-1 z-30 w-40 rounded-btn border border-border bg-surface shadow-xl p-2 space-y-1">
                   {sortHeaders.map(h => (
                     <label key={h.key} className="flex items-center gap-2 text-xs px-1.5 py-1 rounded hover:bg-elevated cursor-pointer">
                       <input type="checkbox"
@@ -1817,7 +1795,7 @@ export function Holdings() {
         {closedRows.length > 0 && (
           <div className="rounded-card border border-border bg-surface overflow-hidden">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-              <span className="text-sm font-semibold text-foreground">清仓明细</span>
+              <span className="text-sm font-semibold text-foreground">已清仓明细</span>
               <span className="text-xs text-muted">{closedRows.length} 只</span>
               <button onClick={() => setShowClosed(v => !v)} className="ml-auto text-[11px] text-accent hover:underline">
                 {showClosed ? '收起' : '展开'}
