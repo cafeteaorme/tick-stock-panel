@@ -1544,6 +1544,8 @@ export const api = {
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbHistoryData: () =>
     request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[] }>('/api/holdings/tzzb/history-data'),
+  holdingsTzzbHkRate: () =>
+    request<{ rate: number; before: number }>('/api/holdings/tzzb/hk-rate'),
   holdingsTzzbHistoryStatus: () =>
     request<{ cached: boolean; date?: string; days?: number; fetched_at?: string | null }>('/api/holdings/tzzb/history-status'),
   holdingsTzzbHistoryFetch: () =>

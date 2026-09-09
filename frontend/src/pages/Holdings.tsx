@@ -603,6 +603,33 @@ function HistoryCacheBlock() {
   )
 }
 
+function HkRateAuto({ setHkRate }: { setHkRate: (v: string) => void }) {
+  const [fetching, setFetching] = useState(false)
+  const [msg, setMsg] = useState('')
+  const fetchRate = async () => {
+    setFetching(true)
+    try {
+      const r = await api.holdingsTzzbHkRate()
+      if (r.rate) { setHkRate(String(r.rate)); setMsg(`已获取账本汇率 ${r.rate}`) }
+      else setMsg('获取失败')
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : '获取失败')
+    } finally {
+      setFetching(false)
+    }
+  }
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <button onClick={fetchRate} disabled={fetching}
+        className="px-2 py-1 rounded-btn bg-elevated text-[10px] text-secondary hover:text-accent inline-flex items-center gap-1"
+        title="从投资账本拉取当日港币汇率">
+        {fetching ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}自动获取
+      </button>
+      {msg && <span className="text-[10px] text-muted">{msg}</span>}
+    </div>
+  )
+}
+
 function HoldingsSettingsDialog({ accountId, onClose }: { accountId: string; onClose: () => void }) {
   const qc = useQueryClient()
   const settings = useQuery({ queryKey: ['holdings-settings'], queryFn: api.holdingsSettings })
@@ -676,8 +703,10 @@ function HoldingsSettingsDialog({ accountId, onClose }: { accountId: string; onC
           <div className="space-y-2.5">
             <div className="text-[11px] font-medium text-secondary">汇率与口径</div>
             {numField('港币兑人民币', '港股市值折算', hkRate, setHkRate)}
+            <HkRateAuto setHkRate={setHkRate} />
             {numField('美元兑人民币', '美股市值折算', usRate, setUsRate)}
             {numField('港股通押金率%', '成本口径说明', deposit, setDeposit, '0.1')}
+            <HkRateAuto setHkRate={setHkRate} />
             <div className="text-[10px] text-muted leading-relaxed">
               港股通买入时按参考汇率+约3%押金预冻结人民币，日终按实际结算汇率清算、多退少补——券商展示的成本价含此缓冲，实际成本以清算为准。
             </div>

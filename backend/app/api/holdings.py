@@ -638,6 +638,14 @@ def export_pnl_csv(request: Request, account: str | None = Query(None)):
     )
 
 
+@router.get("/tzzb/hk-rate")
+def tzzb_hk_rate():
+    """账本港币汇率 (自动): 今日/前日。"""
+    from app.services import tzzb
+
+    return tzzb.fetch_hk_rate() or {"ok": False, "message": "未配置 Cookie 或接口失败"}
+
+
 @router.get("/tzzb/history-status")
 def tzzb_history_status():
     from app.services import tzzb

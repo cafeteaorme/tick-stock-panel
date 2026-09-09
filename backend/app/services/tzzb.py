@@ -238,6 +238,7 @@ def start_background_sync() -> bool:
                     continue
                 _synced_marker = marker
                 res = sync()
+                fetch_hk_rate()
                 logger.info("tzzb scheduled sync %s: %s", marker, res.get("message", "")[:120])
             except Exception as e:  # noqa: BLE001
                 logger.warning("tzzb scheduled sync error: %s", e)
@@ -454,6 +455,25 @@ def _last_trading_day_info() -> dict | None:
     except Exception as e:  # noqa: BLE001
         logger.warning("last_trading_day failed: %s", e)
         return None
+
+
+def fetch_hk_rate() -> dict | None:
+    """账本港币汇率 (当日+前日)。成功存入 config 缓存。"""
+    cookie = (load_config().get("cookie") or "").strip()
+    if not cookie:
+        return None
+    try:
+        ex = _api("/caishen_fund/stock_common/v1/hk_rate", cookie,
+                  {"date": datetime.now(HK_TZ).strftime("%Y%m%d")})
+        rate = _f_pl(ex.get("rate"))
+        before = _f_pl(ex.get("before_rate"))
+        if rate:
+            save_config(hk_rate=rate, hk_rate_before=before,
+                        hk_rate_date=datetime.now(HK_TZ).date().isoformat())
+            return {"rate": rate, "before": before}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("hk_rate fetch failed: %s", e)
+    return None
 
 
 def is_trading_day_today() -> bool:
