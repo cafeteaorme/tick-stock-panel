@@ -1500,6 +1500,12 @@ export const api = {
     request<{ photos: { name: string; source: string; date: string; url: string }[] }>(`/api/watchlist/recent-photos?limit=${limit}`),
 
   // ---------------- 我的持仓 ----------------
+  holdingsTrades: (symbol: string, account?: string) =>
+    request<{ symbol: string; events: { date: string; type: string; price: number; qty: number }[]; cost?: number | null }>(
+      `/api/holdings/${encodeURIComponent(symbol)}/trades${account ? `?account=${encodeURIComponent(account)}` : ''}`,
+    ),
+  holdingsHeldSymbols: () =>
+    request<{ symbols: string[] }>('/api/holdings/held-symbols'),
   holdingsList: (includeClosed = false, account?: string) =>
     request<{ rows: HoldingRow[]; account: string }>(
       `/api/holdings?${includeClosed ? 'include_closed=true&' : ''}${account ? `account=${encodeURIComponent(account)}` : ''}`,

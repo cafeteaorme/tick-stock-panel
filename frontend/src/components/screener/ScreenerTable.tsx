@@ -13,6 +13,7 @@ import type { ColumnConfig } from '@/lib/screener-columns'
 import { getSignals, signalCls } from '@/lib/stock-table'
 import { boardTag, renderBuiltinDataCell } from '@/components/stock-table/primitives'
 import { resolveCandleConfig, resolveIntradayConfig } from '@/lib/list-columns'
+import { HeldBadge } from '@/lib/useHeldSymbols'
 import { MiniCandlestick } from '@/components/stock-table/MiniCandlestick'
 import { MiniIntraday } from '@/components/stock-table/MiniIntraday'
 import { StockDataTable, type SortState } from '@/components/stock-table/StockDataTable'
@@ -224,7 +225,7 @@ export function ScreenerTable({
                     {board.label}
                   </span>
                 ) : (
-                  <span className="shrink-0 w-[18px]" />
+                  <HeldBadge symbol={r.symbol} />
                 )}
                 <span className="font-mono text-secondary group-hover:text-accent transition-colors duration-150 leading-snug">
                   {r.symbol}

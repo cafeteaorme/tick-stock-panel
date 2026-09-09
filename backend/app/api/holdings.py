@@ -165,22 +165,42 @@ def _stored_rows(request: Request) -> list[dict]:
 
 
 def _compute_market(repo, symbols: list[str]) -> dict[str, dict]:
-    """同步计算市场字段 (在后台线程执行)。"""
+    """同步计算市场字段 (在后台线程执行)。ETF 走独立存储, 股票走日K数据集。"""
     out: dict[str, dict] = {}
     cn = [s for s in symbols if not is_hk_or_us(s)]
     hk_us = [s for s in symbols if is_hk_or_us(s)]
-    if cn:
+    etf_set = set()
+    try:
+        etf_set = repo.get_etf_symbol_set()
+    except Exception:  # noqa: BLE001
+        pass
+    cn_stocks = [s for s in cn if s not in etf_set]
+    cn_etfs = [s for s in cn if s in etf_set]
+
+    def _add_closes(sym, df):
+        if df.is_empty() or "close" not in df.columns:
+            return
+        closes = df.sort("date")["close"].to_list()
+        if len(closes) >= 2:
+            out[sym] = _calc_market_fields(closes)
+
+    if cn_stocks:
         try:
             end = date.today()
             start = end - timedelta(days=400)
-            df = repo.get_daily_batch(cn, start, end, columns=["symbol", "date", "close"])
-            for sym in cn:
-                sub = df.filter(pl.col("symbol") == sym).sort("date")
-                closes = sub["close"].to_list()
-                if len(closes) >= 2:
-                    out[sym] = _calc_market_fields(closes)
+            df = repo.get_daily_batch(cn_stocks, start, end, columns=["symbol", "date", "close"])
+            for sym in cn_stocks:
+                _add_closes(sym, df.filter(pl.col("symbol") == sym))
         except Exception as e:  # noqa: BLE001
-            logger.warning("market rows cn failed: %s", e)
+            logger.warning("market rows cn stocks failed: %s", e)
+    # ETF: 走 ETF 独立存储 (kline_etf_enriched)
+    for sym in cn_etfs:
+        try:
+            end = date.today()
+            start = end - timedelta(days=400)
+            _add_closes(sym, repo.get_daily_asset("etf", sym, start, end))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("market rows etf %s failed: %s", sym, e)
     from app.services.kline_sync import fetch_hk_us_daily_with_indicators
 
     for sym in hk_us:
@@ -653,6 +673,18 @@ def tzzb_sync(request: Request, account: str | None = Query(None)):
         except Exception:  # noqa: BLE001
             pass
     return res
+
+
+@router.get("/held-symbols")
+def held_symbols():
+    """全部账户当前持仓的 symbol 集合 (任一账户持有即返回)。供全站列表标记。"""
+    acc_obj = holdings_service.list_accounts()
+    syms: set[str] = set()
+    for a in acc_obj["accounts"]:
+        for r in holdings_service.list_all(a["id"]):
+            if r.get("status") != "closed" and float(r.get("qty") or 0) > 0:
+                syms.add(r["symbol"])
+    return {"symbols": sorted(syms)}
 
 
 # ---------------------------------------------------------------- 收益序列

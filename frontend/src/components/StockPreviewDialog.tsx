@@ -40,7 +40,7 @@ function boardTag(symbol: string): { label: string; color: string } | null {
   return null
 }
 
-export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props) {
+export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers }: Props & { markers?: any[] }) {
   const [showIntraday, setShowIntraday] = useState(false)
   const [dateRange, setDateRange] = useState(getDefaultRange)
   const [showMonitorEditor, setShowMonitorEditor] = useState(false)
@@ -281,6 +281,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
                 symbol={symbol}
                 height={420}
                 showIntraday={showIntraday}
+                markers={markers}
                 onSelectDate={() => { if (!showIntraday && hkUsIntradayAllowed) setShowIntraday(true) }}
                 dateRange={dateRange}
                 onMonitor={() => setShowMonitorEditor(true)}

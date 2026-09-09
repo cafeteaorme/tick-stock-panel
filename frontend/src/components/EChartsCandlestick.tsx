@@ -748,7 +748,14 @@ function buildOption(
       backgroundColor: 'transparent',
       borderWidth: 0,
       textStyle: { fontSize: 0 },
-      formatter: () => '',
+      // 自定义 tooltip: markPoint 的 name 形如 "B 2026-01-05 913.5" 时展示
+      formatter: (params: any) => {
+        if (params?.componentSubType === 'markPoint' || params?.componentType === 'markPoint') {
+          const s = params?.name || ''
+          if (s.includes(' @ ')) return s.split(' @ ').pop() ?? ''
+        }
+        return ''
+      },
     },
     axisPointer: {
       link: [{ xAxisIndex: 'all' }],

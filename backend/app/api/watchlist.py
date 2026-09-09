@@ -438,7 +438,12 @@ def watchlist_enriched(
     try:
         from app.services import holdings as holdings_svc
 
-        h_rows = holdings_svc.list_all()
+        h_rows: list[dict] = []
+        acc_obj = holdings_svc.list_accounts()
+        for _a in acc_obj["accounts"]:
+            for r in holdings_svc.list_all(_a["id"]):
+                if r.get("status") != "closed" and float(r.get("qty") or 0) > 0:
+                    h_rows.append(r)
         if h_rows:
             h_df = pl.DataFrame({
                 "symbol": [r["symbol"] for r in h_rows],

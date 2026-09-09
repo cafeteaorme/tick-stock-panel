@@ -1354,7 +1354,6 @@ type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_va
 
 export function Holdings() {
   const qc = useQueryClient()
-  const [tab, setTab] = useState<'day' | 'month' | 'year'>('day')
   const [year, setYear] = useState(new Date().getFullYear())
   const [editing, setEditing] = useState<HoldingRow | null>(null)
   const [showAdd, setShowAdd] = useState(false)
@@ -1366,6 +1365,23 @@ export function Holdings() {
   const [aiKey, setAiKey] = useState(0)
   const [previewSymbol, setPreviewSymbol] = useState<string | null>(null)
   const [previewName, setPreviewName] = useState('')
+  const [previewMarkers, setPreviewMarkers] = useState<any[] | undefined>(undefined)
+  const openPreview = (sym: string, name: string) => {
+    setPreviewSymbol(sym)
+    setPreviewName(name)
+    setPreviewMarkers(undefined)
+    // 持仓股: 拉 B/S 买卖点
+    api.holdingsTrades(sym, activeAcc || undefined).then(d => {
+      const mk = (d.events ?? []).map(ev => ({
+        date: ev.date,
+        kind: ev.type === 'B' ? 'buy' : 'sell',
+        // B/S 常显 + 悬浮(axis tooltip)显示买入价格
+        label: ev.type === 'B' ? `B ${ev.price}` : `S ${ev.price}`,
+        price: ev.price,
+      }))
+      setPreviewMarkers(mk.length ? mk : undefined)
+    }).catch(() => {})
+  }
   const [sortKey, setSortKey] = useState<SortKey>('market_value')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(() => {
@@ -1432,7 +1448,7 @@ export function Holdings() {
       const st = await api.holdingsSettings()
       return api.holdingsBenchmark(`${year}-01-01`, st.benchmark)
     },
-    enabled: tab === 'year' && !!activeAcc,
+    enabled: !!activeAcc,
   })
   // 账本权威月度收益 (投资账本缓存)
   const historyData = useQuery({
@@ -1484,7 +1500,6 @@ export function Holdings() {
 
   const monthNow = new Date().getMonth() + 1
   const yearPnl = pnl.data?.yearly?.[0]?.pnl
-  const monthPnl = pnl.data?.monthly?.[pnl.data.monthly.length - 1]?.pnl
   const todayPnl = pnl.data?.daily?.[pnl.data.daily.length - 1]?.pnl
 
   const sortHeaders: { key: SortKey; label: string }[] = [
@@ -1731,7 +1746,7 @@ export function Holdings() {
                   const badge = REGION_BADGE[r.region ?? 'CN']
                   return (
                     <tr key={r.symbol} className="border-b border-border/40 hover:bg-elevated/30 transition-colors cursor-pointer"
-                      onClick={() => { setPreviewSymbol(r.symbol); setPreviewName(r.name || '') }}>
+                      onClick={() => openPreview(r.symbol, r.name || '')}>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1.5">
                           {badge && <span className={`px-1 py-px rounded text-[9px] font-bold border ${badge.cls}`}>{badge.label}</span>}
@@ -1828,81 +1843,76 @@ export function Holdings() {
           </div>
         )}
 
-        {/* 持仓结构 + 盈亏贡献 */}
+        {/* 左: 持仓结构 + 个股盈亏贡献 (上下) | 右: 日收益日历 对齐 */}
         {rows.length > 0 && (
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="rounded-card border border-border bg-surface p-4">
-              <div className="flex items-center gap-2 mb-2"><PieIcon className="h-4 w-4 text-accent" /><span className="text-sm font-semibold text-foreground">持仓结构</span></div>
-              <HoldingsPie rows={rows} />
-            </div>
-            <div className="rounded-card border border-border bg-surface p-4">
-              <div className="flex items-center gap-2 mb-3"><TrendingUp className="h-4 w-4 text-accent" /><span className="text-sm font-semibold text-foreground">个股盈亏贡献</span></div>
-              <div className="space-y-2">
-                {(s?.contributions ?? []).map(c => {
-                  const maxAbs = Math.max(1, ...(s?.contributions ?? []).map(x => Math.abs(x.float_pnl ?? 0)))
-                  const w = Math.abs(c.float_pnl ?? 0) / maxAbs * 100
-                  return (
-                    <div key={c.symbol} className="flex items-center gap-2 text-xs">
-                      <span className="w-20 truncate text-secondary text-right shrink-0">{c.name || c.symbol}</span>
-                      <div className="flex-1 h-4 rounded bg-elevated/50 overflow-hidden flex justify-end">
-                        <div className={`h-full rounded ${c.float_pnl! >= 0 ? 'bg-[#ef4444]/70' : 'bg-[#22c55e]/70'}`} style={{ width: `${w}%` }} />
+          <div className="flex gap-4 items-start">
+            <div className="w-[46%] shrink-0 space-y-4">
+              <div className="rounded-card border border-border bg-surface p-4">
+                <div className="flex items-center gap-2 mb-2"><PieIcon className="h-4 w-4 text-accent" /><span className="text-sm font-semibold text-foreground">持仓结构</span></div>
+                <HoldingsPie rows={rows} />
+              </div>
+              <div className="rounded-card border border-border bg-surface p-4">
+                <div className="flex items-center gap-2 mb-3"><TrendingUp className="h-4 w-4 text-accent" /><span className="text-sm font-semibold text-foreground">个股盈亏贡献</span></div>
+                <div className="space-y-2">
+                  {(s?.contributions ?? []).map(c => {
+                    const maxAbs = Math.max(1, ...(s?.contributions ?? []).map(x => Math.abs(x.float_pnl ?? 0)))
+                    const w = Math.abs(c.float_pnl ?? 0) / maxAbs * 100
+                    return (
+                      <div key={c.symbol} className="flex items-center gap-2 text-xs">
+                        <span className="w-20 truncate text-secondary text-right shrink-0">{c.name || c.symbol}</span>
+                        <div className="flex-1 h-4 rounded bg-elevated/50 overflow-hidden flex justify-end">
+                          <div className={`h-full rounded ${c.float_pnl! >= 0 ? 'bg-[#ef4444]/70' : 'bg-[#22c55e]/70'}`} style={{ width: `${w}%` }} />
+                        </div>
+                        <span className={`w-16 tabular-nums text-right shrink-0 ${pnlColor(c.float_pnl)}`}>{fmtMoney(c.float_pnl, 0)}</span>
                       </div>
-                      <span className={`w-16 tabular-nums text-right shrink-0 ${pnlColor(c.float_pnl)}`}>{fmtMoney(c.float_pnl, 0)}</span>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 min-w-0 space-y-4">
+              {/* 日收益: 右列顶部 */}
+              <div className="rounded-card border border-border bg-surface p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-foreground">日收益</span>
+                  <div className="flex items-center gap-2 text-sm">
+                    <button onClick={() => setYear(y => y - 1)} className="px-1.5 text-secondary hover:text-foreground rotate-90"><ChevronDown className="h-4 w-4" /></button>
+                    <span className="tabular-nums font-semibold">{year} 年</span>
+                    <button onClick={() => setYear(y => y + 1)} className="px-1.5 text-secondary hover:text-foreground -rotate-90"><ChevronDown className="h-4 w-4" /></button>
+                    <span className={`text-xs tabular-nums font-medium ${pnlColor(todayPnl)}`}>今日 {fmtMoney(todayPnl)}</span>
+                  </div>
+                  <button onClick={() => window.open(`/api/holdings/export/pnl.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')} className="text-[11px] text-accent hover:underline">导出</button>
+                </div>
+                {pnl.isLoading ? <LoadingSkeleton height={260} />
+                  : <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} />}
+              </div>
+              {/* 月收益: 下方 */}
+              <div className="rounded-card border border-border bg-surface p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-foreground">月收益</span>
+                  {(historyData.data?.monthly?.find(mm => mm.period === `${year}-${String(monthNow).padStart(2, '0')}`)) && (
+                    <span className="text-xs text-secondary">含本月</span>
+                  )}
+                </div>
+                <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
               </div>
             </div>
           </div>
         )}
 
-        {/* 日/月/年收益 (置于最下) */}
+        {/* 年收益: 独立下方 */}
         <div className="rounded-card border border-border bg-surface p-4">
-          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-            <div className="flex items-center gap-1 p-0.5 rounded-btn bg-elevated text-xs">
-              {([['day', '日收益'], ['month', '月收益'], ['year', '年收益']] as const).map(([t, label]) => (
-                <button key={t} onClick={() => setTab(t)}
-                  className={`px-3 py-1.5 rounded-[inherit] transition-colors ${tab === t ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              <button onClick={() => setYear(y => y - 1)} className="px-1.5 text-secondary hover:text-foreground rotate-90"><ChevronDown className="h-4 w-4" /></button>
-              <span className="tabular-nums font-semibold">{year} 年</span>
-              <button onClick={() => setYear(y => y + 1)} className="px-1.5 text-secondary hover:text-foreground -rotate-90"><ChevronDown className="h-4 w-4" /></button>
-              {tab === 'day' && <span className={`text-xs tabular-nums font-medium ${pnlColor(todayPnl)}`}>今日 {fmtMoney(todayPnl)}</span>}
-              {tab === 'month' && (() => {
-                const ym = `${year}-${String(monthNow).padStart(2, '0')}`
-                const ledger = historyData.data?.monthly?.find(mm => mm.period === ym)
-                const v = ledger ? ledger.pnl : monthPnl
-                return <span className={`text-xs tabular-nums font-medium ${pnlColor(v)}`}>本月 {fmtMoney(v)}{ledger ? ' 账本' : ''}</span>
-              })()}
-              {tab === 'year' && (() => {
-                const ledger = historyData.data?.yearly?.find(yy => yy.period === String(year))
-                const v = ledger ? ledger.pnl : yearPnl
-                return <span className={`text-xs tabular-nums font-medium ${pnlColor(v)}`}>本年 {fmtMoney(v)}{ledger ? ' 账本' : ''}</span>
-              })()}
-            </div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-foreground">年收益</span>
+            {(() => {
+              const ledger = historyData.data?.yearly?.find(yy => yy.period === String(year))
+              const v = ledger ? ledger.pnl : yearPnl
+              return v != null ? (
+                <span className={`text-sm tabular-nums font-medium ${pnlColor(v)}`}>{fmtMoney(v)}{ledger ? '（账本）' : ''}</span>
+              ) : null
+            })()}
           </div>
-
-          {pnl.isLoading ? (
-            <div className="h-48 flex items-center justify-center text-xs text-muted"><Loader2 className="h-4 w-4 animate-spin mr-2" />收益计算中…</div>
-          ) : tab === 'day' ? (
-            <>
-              <div className="flex justify-end mb-1">
-                <button
-                  onClick={() => window.open(`/api/holdings/export/pnl.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')}
-                  className="text-[11px] text-accent hover:underline"
-                >导出日收益 CSV</button>
-              </div>
-              <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} />
-            </>
-          ) : tab === 'month' ? (
-            <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
-          ) : (
-            <AssetCurve daily={pnl.data?.daily ?? []} benchmark={benchmark.data} />
-          )}
+          <AssetCurve daily={pnl.data?.daily ?? []} benchmark={benchmark.data} />
         </div>
       </div>
 
@@ -1934,6 +1944,7 @@ export function Holdings() {
           symbol={previewSymbol}
           name={previewName}
           triggerInfo={undefined}
+          markers={previewMarkers}
           onClose={() => setPreviewSymbol(null)}
         />
       )}
