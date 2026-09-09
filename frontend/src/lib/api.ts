@@ -259,6 +259,17 @@ export interface WatchlistImportResult {
   candidates: WatchlistImportCandidate[]
   matched_count: number
   unmatched_count: number
+  /** 截图汇总区 (AI 通道): 总资产/总盈亏/当日盈亏/市值/可用/可取等 */
+  summary?: {
+    total_asset?: number | null
+    total_pnl?: number | null
+    day_pnl?: number | null
+    day_pnl_pct?: number | null
+    market_value?: number | null
+    cash_available?: number | null
+    cash_withdrawable?: number | null
+    position_pct?: number | null
+  } | null
 }
 
 /** 我的持仓行 (含实时行情与盈亏) */

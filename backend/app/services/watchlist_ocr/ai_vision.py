@@ -28,35 +28,39 @@ from app.services.watchlist_ocr.provider import OcrProvider
 
 logger = logging.getLogger(__name__)
 
-_PROMPT = """识别这张券商持仓截图中的每一条持仓记录。只输出 JSON 数组, 每条一个对象:
-[{"market":"CN|HK|US","code":"图中可见的代码,不可见用null","name":"名称原文","qty":持仓数量,"available":可用数量,"cost":成本价}]
+_PROMPT = """识别这张券商持仓截图。只输出 JSON 对象 (含汇总区与持仓明细两部分):
+{"summary":{"total_asset":总资产,"total_pnl":总盈亏,"day_pnl":当日参考盈亏,"day_pnl_pct":当日盈亏百分比,"market_value":总市值,"cash_available":可用,"cash_withdrawable":可取,"position_pct":仓位百分比},
+ "holdings":[{"market":"CN|HK|US","code":"图中可见的代码,不可见null","name":"名称原文","qty":持仓数量,"available":可用数量,"cost":成本价}]}
 
 说明:
+- summary 各项取图中汇总区数字, 全部缺失时 summary 为 null; 百分比用小数 (-0.61% → -0.0061)
 - market 按交易所/货币/代码形态判断 (6位数字=CN, 4-5位数字=HK, 字母=US)
-- 数量取「持仓」列, 可用取「可用」列; cost 忽略货币符号保留全部小数位
-- 某字段确实看不到就用 null; 已清仓 (数量 0) 的行也要输出
+- holdings: 数量取「持仓」列, 可用取「可用」列; cost 忽略货币符号保留全部小数位
+- 某字段看不到就用 null; 已清仓 (数量 0) 的行也要输出
 不要输出 JSON 以外的任何内容。"""
 
 _DATA_LINE_RE = re.compile(r"^\s*(CN|HK|US)\s+\S+\s+\S+.*$")
 
 
 def _clean_model_output(text: str) -> str:
-    """剥离 <think> 推理与围栏, 提取 JSON 数组 (AI 通道输出); 无 JSON 时退回数据行格式。"""
+    """剥离 <think> 推理与围栏, 提取 JSON 对象/数组; 无 JSON 时退回数据行格式。"""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"<think>.*", "", text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r"```[a-z]*", "", text, flags=re.IGNORECASE)
-    start = text.find("[")
-    end = text.rfind("]")
-    if start != -1 and end > start:
-        candidate = text[start : end + 1].strip()
-        try:
-            import json as _json
+    # 优先找对象 {"summary":...}; 否则找数组 (旧行格式兜底)
+    for open_ch, close_ch in (("{", "}"), ("[", "]")):
+        start = text.find(open_ch)
+        end = text.rfind(close_ch)
+        if start != -1 and end > start:
+            candidate = text[start : end + 1].strip()
+            try:
+                import json as _json
 
-            arr = _json.loads(candidate)
-            if isinstance(arr, list):
-                return candidate
-        except Exception:  # noqa: BLE001
-            pass
+                parsed = _json.loads(candidate)
+                if isinstance(parsed, (dict, list)):
+                    return candidate
+            except Exception:  # noqa: BLE001
+                continue
     lines = [ln.strip() for ln in text.splitlines()]
     return "\n".join(ln for ln in lines if _DATA_LINE_RE.match(ln))
 

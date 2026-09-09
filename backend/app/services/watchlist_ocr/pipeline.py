@@ -517,17 +517,31 @@ def import_watchlist_image(
     existing = existing_symbols or set()
     all_names = {**symbol_to_name, **hk_us_names}
 
-    # AI 视觉通道输出 JSON 数组 → 结构化解析; 否则按行解析 (Tesseract 文本)
+    # AI 视觉通道输出 JSON → 结构化解析; 否则按行解析 (Tesseract 文本)
     import json as _json
 
     candidates: list[ImportCandidate] = []
+    summary_out: dict[str, Any] | None = None
     stripped = (text or "").strip()
-    if stripped.startswith("["):
+    if stripped.startswith(("[", "{")):
         try:
-            items = _json.loads(stripped)
+            parsed_json = _json.loads(stripped)
         except Exception as e:  # noqa: BLE001
             logger.warning("ai_vision JSON parse failed: %s", e)
-            items = []
+            parsed_json = []
+        # 对象形态: {"summary":{...},"holdings":[...]}
+        if isinstance(parsed_json, dict):
+            raw_summary = parsed_json.get("summary")
+            if isinstance(raw_summary, dict):
+                summary_out = {
+                    k: _num_or_none(v)
+                    for k, v in raw_summary.items()
+                    if k in ("total_asset", "total_pnl", "day_pnl", "day_pnl_pct",
+                             "market_value", "cash_available", "cash_withdrawable", "position_pct")
+                }
+            items = parsed_json.get("holdings") or []
+        else:
+            items = parsed_json if isinstance(parsed_json, list) else []
         for it in items if isinstance(items, list) else []:
             if not isinstance(it, dict):
                 continue
@@ -605,4 +619,6 @@ def import_watchlist_image(
         "candidates": [c.to_dict() for c in candidates],
         "matched_count": len(matched),
         "unmatched_count": len(unmatched),
+        # 截图汇总区 (AI 通道; total_asset/total_pnl/day_pnl/market_value/cash_available/...)
+        "summary": summary_out,
     }

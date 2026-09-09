@@ -9,6 +9,18 @@ import { QK } from '@/lib/queryKeys'
 import { toast } from '@/components/Toast'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { RecentPhotoStrip, type PickedImage } from '@/components/imports/RecentPhotoStrip'
+
+/** 截图汇总区 (AI 识别) */
+interface ShotSummary {
+  total_asset?: number | null
+  total_pnl?: number | null
+  day_pnl?: number | null
+  day_pnl_pct?: number | null
+  market_value?: number | null
+  cash_available?: number | null
+  cash_withdrawable?: number | null
+  position_pct?: number | null
+}
 import type { ECharts } from 'echarts'
 
 /* ================================================================
@@ -490,10 +502,65 @@ function AddDialog({ onClose }: { onClose: () => void }) {
  * 截图导入 (识别 → 年/月/日级联日期选择 → 导入)
  * ================================================================ */
 
-function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
+/** 截图汇总区展示 + 总盈亏核准 (本金 - 总资产 vs 截图总盈亏) */
+function ShotSummaryBlock({
+  s, baseCap, onBaseCap,
+}: { s: ShotSummary; baseCap: string; onBaseCap: (v: string) => void }) {
+  const fields: [string, number | null | undefined, boolean][] = [
+    ['总资产', s.total_asset, false],
+    ['总盈亏', s.total_pnl, true],
+    ['当日盈亏', s.day_pnl, true],
+    ['当日盈亏%', s.day_pnl_pct != null ? s.day_pnl_pct * 100 : null, true],
+    ['总市值', s.market_value, false],
+    ['可用', s.cash_available, false],
+    ['可取', s.cash_withdrawable, false],
+    ['仓位%', s.position_pct != null ? s.position_pct * 100 : null, false],
+  ]
+  const capN = Number(baseCap)
+  const hasCap = capN > 0 && s.total_asset != null
+  const calcPnl = hasCap ? capN - s.total_asset! : null
+  const diff = calcPnl != null && s.total_pnl != null ? calcPnl - s.total_pnl : null
+  return (
+    <div className="rounded-btn border border-border bg-elevated/30 px-3 py-2.5 space-y-2">
+      <div className="text-[11px] font-medium text-secondary">截图汇总区</div>
+      <div className="grid grid-cols-4 gap-x-3 gap-y-1.5">
+        {fields.map(([label, v, colored]) => (
+          <div key={label} className="min-w-0">
+            <div className="text-[9px] text-muted truncate">{label}</div>
+            <div className={`text-[11px] tabular-nums font-medium truncate ${colored ? pnlColor(v) : 'text-foreground'}`}>
+              {label.includes('%') ? (v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '—') : fmtMoney(v)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* 总盈亏核准: 本金 - 总资产 vs 截图总盈亏 */}
+      <div className="pt-1.5 border-t border-border/50 space-y-1.5">
+        <label className="flex items-center gap-2 text-[11px]">
+          <span className="text-muted shrink-0">初始本金核准</span>
+          <input type="number" step="any" value={baseCap} onChange={e => onBaseCap(e.target.value)} placeholder="输入本金"
+            className="w-28 h-6.5 px-2 rounded bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+          <span className="text-muted">→ 本金 - 总资产 =</span>
+          <span className={`tabular-nums font-medium ${pnlColor(calcPnl)}`}>{calcPnl != null ? fmtMoney(calcPnl) : '—'}</span>
+        </label>
+        {diff != null && (
+          <div className={`text-[10px] tabular-nums ${Math.abs(diff) < 1 ? 'text-emerald-400' : 'text-amber-400'}`}>
+            {Math.abs(diff) < 1
+              ? '✓ 与截图总盈亏一致'
+              : `⚠ 与截图总盈亏相差 ${fmtMoney(diff)}（本金口径或期间出入金）`}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [queue, setQueue] = useState<PickedImage[]>([])
+  const [shotSummary, setShotSummary] = useState<ShotSummary | null>(null)
+  const [baseCap, setBaseCap] = useState('')
+  const [syncCash, setSyncCash] = useState(true)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [provider, setProvider] = useState('')
@@ -521,6 +588,16 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const autoStarted = useRef(false)
+  useEffect(() => {
+    if (autoStarted.current || !initialImages?.length) return
+    autoStarted.current = true
+    setQueue(initialImages)
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    void recognizeAll(initialImages)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const addImages = (imgs: PickedImage[]) => {
     setQueue(prev => {
       const seen = new Set(prev.map(i => i.key))
@@ -532,19 +609,21 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
     })
   }
 
-  const recognizeAll = async () => {
-    if (queue.length === 0) { toast('请先选择截图', 'error'); return }
+  const recognizeAll = async (imgs?: PickedImage[]) => {
+    const list = imgs && imgs.length ? imgs : queue
+    if (list.length === 0) { toast('请先选择截图', 'error'); return }
     setBusy(true)
     const out: ImageResult[] = []
     let latestDate = ''
     let totalRows = 0
-    for (let i = 0; i < queue.length; i++) {
-      setProgress(`识别中 ${i + 1}/${queue.length}…`)
-      const url = URL.createObjectURL(queue[i].file)
+    for (let i = 0; i < list.length; i++) {
+      setProgress(`识别中 ${i + 1}/${list.length}…`)
+      const url = URL.createObjectURL(list[i].file)
       const rows: Row[] = []
       try {
-        const res = await api.watchlistImportImage(queue[i].file, undefined, true)
+        const res = await api.watchlistImportImage(list[i].file, undefined, true)
         setProvider(res.provider)
+        if (res.summary && Object.values(res.summary).some(v => v != null)) setShotSummary(res.summary)
         for (const c of res.candidates) {
           if (!c.matched || !c.symbol) continue
           rows.push({
@@ -561,8 +640,8 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
         toast(e instanceof Error ? e.message : `第 ${i + 1} 张识别失败`, 'error')
       }
       totalRows += rows.length
-      out.push({ img: queue[i], url, rows })
-      if (queue[i].date > latestDate) latestDate = queue[i].date
+      out.push({ img: list[i], url, rows })
+      if (list[i].date > latestDate) latestDate = list[i].date
     }
     setProgress('')
     setBusy(false)
@@ -646,12 +725,23 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
       importDate,
       cash ? Number(cash) : undefined,
     ),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       qc.invalidateQueries({ queryKey: QK.holdings })
       qc.invalidateQueries({ queryKey: QK.holdingsSummary })
       qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
       qc.invalidateQueries({ queryKey: QK.watchlist })
       qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
+      // 截图汇总联动: 今日 → 可用同步到现金 + 本金核准值可写回; 历史 → 当日现金已随快照
+      try {
+        if (!res.snapshot) {
+          const patch: { cash?: number; initial_cap?: number } = {}
+          if (syncCash && shotSummary?.cash_available != null) patch.cash = shotSummary.cash_available
+          const capN = Number(baseCap)
+          if (capN > 0 && capN !== (await qc.fetchQuery({ queryKey: QK.holdingsSummary, queryFn: api.holdingsSummary })).initial_cap) patch.initial_cap = capN
+          if (Object.keys(patch).length) await api.holdingsPortfolio(patch)
+          qc.invalidateQueries({ queryKey: QK.holdingsSummary })
+        }
+      } catch { /* 资金同步失败不影响导入结果 */ }
       toast(res.snapshot ? `已存入 ${res.date} 历史快照` : '持仓已更新（今日）', 'success')
       onClose()
     },
@@ -681,7 +771,7 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
           <input type="number" step="any" value={r.available} placeholder="可用" onChange={e => onUpdate(r.symbol, { available: e.target.value })}
             className="w-14 px-1.5 h-7 rounded bg-base border border-border text-right tabular-nums focus:outline-none focus:border-accent/50" />
           <input type="number" step="any" value={r.cost} placeholder="成本" onChange={e => onUpdate(r.symbol, { cost: e.target.value })}
-            className="w-18 px-1.5 h-7 rounded bg-base border border-border text-right tabular-nums focus:outline-none focus:border-accent/50" />
+            className="w-20 px-1.5 h-7 rounded bg-base border border-border text-right tabular-nums focus:outline-none focus:border-accent/50" />
           <button onClick={() => onRemove(r.symbol)} className="p-1 rounded-btn text-secondary hover:text-danger shrink-0" title="移除"><X className="h-3.5 w-3.5" /></button>
         </div>
       ))}
@@ -753,7 +843,7 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
                     </div>
                   ))}
                 </div>
-                <button onClick={recognizeAll} disabled={busy}
+                <button onClick={() => recognizeAll()} disabled={busy}
                   className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
                   {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   {busy ? progress : `开始识别（${queue.length} 张）`}
@@ -775,6 +865,11 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
                 <span className="text-muted">{cur.img.date}</span>
               </div>
               {renderRows(curRows, curChecked, toggleCur, updateCur, s => setCurRows(prev => prev.filter(x => x.symbol !== s)))}
+              {shotSummary && <ShotSummaryBlock
+                s={shotSummary}
+                baseCap={baseCap}
+                onBaseCap={setBaseCap}
+              />}
               <div className="pt-1 space-y-2 border-t border-border/60">
                 <button onClick={goNext}
                   className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 inline-flex items-center justify-center gap-1.5">
@@ -796,6 +891,7 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
                 className="text-[11px] text-accent hover:underline">重新选图</button>
             </div>
             {renderRows(summaryRows, summaryChecked, toggleSummary, updateSummary, s => setSummaryRows(prev => prev.filter(x => x.symbol !== s)))}
+            {shotSummary && <ShotSummaryBlock s={shotSummary} baseCap={baseCap} onBaseCap={setBaseCap} />}
             <div className="pt-1 space-y-2 border-t border-border/60">
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-secondary shrink-0">导入日期</span>
@@ -808,6 +904,14 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
                   <input type="number" step="any" value={cash} onChange={e => setCash(e.target.value)} placeholder="可选，用于分段回算"
                     className="flex-1 h-8 px-2 rounded-btn bg-base border border-border tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
                 </div>
+              )}
+              {isToday && shotSummary?.cash_available != null && (
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={syncCash} onChange={e => setSyncCash(e.target.checked)} className="rounded border-border" />
+                  <span className="text-secondary">
+                    同步可用资金到现金（截图可用 {fmtMoney(shotSummary.cash_available)}）
+                  </span>
+                </label>
               )}
               <div className="text-[11px] text-muted rounded-btn bg-elevated/40 px-3 py-1.5">
                 {isToday ? '今日截图 → 直接更新当前持仓' : `${importDate}（历史）→ 存为该日快照，收益按快照分段回算`}
@@ -1035,8 +1139,40 @@ export function Holdings() {
     else { setSortKey(k); setSortDir(k === 'name' ? 'asc' : 'desc') }
   }
 
+  // 整页拖拽截图 → 自动识别导入
+  const [dragOver, setDragOver] = useState(false)
+  const [dropImages, setDropImages] = useState<PickedImage[] | undefined>(undefined)
+  const [dropKey, setDropKey] = useState(0)
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const files = Array.from(e.dataTransfer.files ?? []).filter(f => f.type.startsWith('image/'))
+    if (files.length === 0) return
+    setDropImages(files.map(f => ({
+      file: f,
+      date: f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : todayIso(),
+      key: `drop:${f.name}:${f.lastModified}:${Date.now()}`,
+    })))
+    setDropKey(k => k + 1)
+    setShowImport(true)
+  }
+
   return (
-    <div className="h-full flex flex-col">
+    <div
+      className="h-full flex flex-col relative"
+      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false) }}
+      onDrop={onDrop}
+    >
+      {dragOver && (
+        <div className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center">
+          <div className="absolute inset-2 rounded-card border-2 border-dashed border-accent/70 bg-accent/5" />
+          <div className="relative text-sm font-medium text-accent bg-surface/90 px-4 py-2 rounded-card border border-accent/30 shadow-lg">
+            松开鼠标，自动识别持仓截图
+          </div>
+        </div>
+      )}
       {/* 页头 */}
       <div className="px-4 md:px-6 py-3 border-b border-border flex items-center gap-3 flex-wrap shrink-0">
         <Briefcase className="h-5 w-5 text-accent" />
@@ -1203,7 +1339,13 @@ export function Holdings() {
       {editing && <EditDialog row={editing} onClose={() => setEditing(null)} />}
       {showPortfolio && s && <PortfolioDialog initial={s.initial_cap} cash={s.cash} onClose={() => setShowPortfolio(false)} />}
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}
-      {showImport && <HoldingsImportDialog onClose={() => setShowImport(false)} />}
+      {showImport && (
+        <HoldingsImportDialog
+          key={dropKey}
+          initialImages={dropImages}
+          onClose={() => { setShowImport(false); setDropImages(undefined) }}
+        />
+      )}
       {dayDetail && <DayDetailDialog day={dayDetail} onClose={() => setDayDetail(null)} />}
       {previewSymbol && (
         <StockPreviewDialog
