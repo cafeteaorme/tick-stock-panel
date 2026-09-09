@@ -189,3 +189,74 @@ def set_portfolio(initial_cap: float | None = None, cash: float | None = None) -
     }
     _portfolio_path().write_text(json.dumps(obj, ensure_ascii=False), "utf-8")
     return obj
+
+
+# ---------------------------------------------------------------- 历史快照
+
+
+def _snap_dir() -> Path:
+    p = settings.data_dir / "user_data" / "holdings_snapshots"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def save_snapshot(date_iso: str, rows: list[dict] | None = None, cash: float | None = None) -> dict:
+    """保存某交易日的持仓快照 (截图导入历史日期时写入)。
+
+    rows 缺省 = 当前持仓; cash 缺省 = 当前资金。覆盖同日已有快照。
+    """
+    obj_rows = rows if rows is not None else list_all()
+    port = get_portfolio()
+    obj = {
+        "date": date_iso,
+        "cash": float(cash) if cash is not None else port["cash"],
+        "rows": [
+            {"symbol": r["symbol"], "qty": float(r.get("qty") or 0),
+             "available": r.get("available"), "avg_cost": r.get("avg_cost")}
+            for r in obj_rows
+        ],
+        "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }
+    (_snap_dir() / f"{date_iso.replace('-', '')}.json").write_text(
+        json.dumps(obj, ensure_ascii=False), "utf-8"
+    )
+    return obj
+
+
+def list_snapshots() -> list[dict]:
+    out = []
+    for f in sorted(_snap_dir().glob("*.json")):
+        try:
+            out.append(json.loads(f.read_text("utf-8")))
+        except Exception:  # noqa: BLE001
+            continue
+    out.sort(key=lambda x: x["date"])
+    return out
+
+
+def snapshot_timeline() -> list[dict]:
+    """返回分段时间线: 快照(按日期升序) + 末尾当前持仓 (date=今天)。
+
+    每段: {date, cash, rows:[{symbol,qty,avg_cost}]} — 该日期起生效的组合状态。
+    """
+    segs: list[dict] = [
+        {"date": s["date"], "cash": float(s.get("cash") or 0), "rows": s.get("rows") or []}
+        for s in list_snapshots()
+    ]
+    today = datetime.utcnow().date().isoformat()
+    cur = list_all()
+    port = get_portfolio()
+    if cur:
+        segs.append({
+            "date": today,
+            "cash": port["cash"],
+            "rows": [
+                {"symbol": r["symbol"], "qty": float(r.get("qty") or 0), "avg_cost": r.get("avg_cost")}
+                for r in cur
+            ],
+        })
+    # 同日去重 (快照与今日重合时保留后者)
+    dedup: dict[str, dict] = {}
+    for s in segs:
+        dedup[s["date"]] = s
+    return [dedup[k] for k in sorted(dedup)]

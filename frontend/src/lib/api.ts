@@ -1473,11 +1473,49 @@ export const api = {
       '/api/holdings/portfolio',
       { method: 'PUT', body: JSON.stringify(body) },
     ),
-  holdingsImport: (items: { symbol: string; qty: number; available?: number; cost?: number }[]) =>
-    request<{ imported: number }>('/api/holdings/import', {
+  holdingsImport: (items: { symbol: string; qty: number; available?: number; cost?: number }[], date?: string, cash?: number) =>
+    request<{ imported: number; date: string; snapshot: boolean }>('/api/holdings/import', {
       method: 'POST',
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, date, cash }),
     }),
+  holdingsPnlDay: (day: string) =>
+    request<{ date: string; total: number; rows: { symbol: string; name?: string | null; qty: number; close: number; pnl: number; pnl_pct: number | null }[] }>(
+      `/api/holdings/pnl/day/${day}`,
+    ),
+  async *holdingsAnalyzeStream(): AsyncGenerator<{
+    type: 'meta' | 'delta' | 'error' | 'done'
+    summary?: string
+    content?: string
+    message?: string
+  }> {
+    const res = await fetch('/api/holdings/analyze', { method: 'POST' })
+    if (!res.ok) {
+      let detail = ''
+      try { const j = JSON.parse(await res.text()); detail = j.detail ?? j.message ?? '' } catch { /* ignore */ }
+      const msg = detail || `${res.status} ${res.statusText}`
+      toast(msg, 'error')
+      throw new Error(msg)
+    }
+    if (!res.body) throw new Error('响应无 body')
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() ?? ''
+      for (const line of lines) {
+        const s = line.trim()
+        if (!s) continue
+        try { yield JSON.parse(s) } catch { /* ignore */ }
+      }
+    }
+    if (buf.trim()) {
+      try { yield JSON.parse(buf.trim()) } catch { /* ignore */ }
+    }
+  },
   holdingsPnl: (start?: string, end?: string) =>
     request<HoldingsPnl>(
       `/api/holdings/pnl${start ? `?start=${start}` : ''}${end ? `${start ? '&' : '?'}end=${end}` : ''}`,
