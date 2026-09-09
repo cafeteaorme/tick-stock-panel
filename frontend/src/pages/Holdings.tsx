@@ -502,10 +502,16 @@ function AddDialog({ onClose }: { onClose: () => void }) {
  * 截图导入 (识别 → 年/月/日级联日期选择 → 导入)
  * ================================================================ */
 
-/** 截图汇总区展示 + 总盈亏核准 (本金 - 总资产 vs 截图总盈亏) */
+/** 截图汇总区展示; 累计盈亏 = 本金 - 出金 - 总资产 (本金默认读持仓资金设置, 出金默认 0) */
 function ShotSummaryBlock({
-  s, baseCap, onBaseCap,
-}: { s: ShotSummary; baseCap: string; onBaseCap: (v: string) => void }) {
+  s, baseCap, onBaseCap, outFlow, onOutFlow,
+}: {
+  s: ShotSummary
+  baseCap: string
+  onBaseCap: (v: string) => void
+  outFlow: string
+  onOutFlow: (v: string) => void
+}) {
   const fields: [string, number | null | undefined, boolean][] = [
     ['总资产', s.total_asset, false],
     ['总盈亏', s.total_pnl, true],
@@ -516,10 +522,9 @@ function ShotSummaryBlock({
     ['可取', s.cash_withdrawable, false],
     ['仓位%', s.position_pct != null ? s.position_pct * 100 : null, false],
   ]
-  const capN = Number(baseCap)
-  const hasCap = capN > 0 && s.total_asset != null
-  const calcPnl = hasCap ? capN - s.total_asset! : null
-  const diff = calcPnl != null && s.total_pnl != null ? calcPnl - s.total_pnl : null
+  const capN = Number(baseCap) || 0
+  const outN = Number(outFlow) || 0
+  const cumPnl = s.total_asset != null ? capN - outN - s.total_asset : null
   return (
     <div className="rounded-btn border border-border bg-elevated/30 px-3 py-2.5 space-y-2">
       <div className="text-[11px] font-medium text-secondary">截图汇总区</div>
@@ -533,22 +538,16 @@ function ShotSummaryBlock({
           </div>
         ))}
       </div>
-      {/* 总盈亏核准: 本金 - 总资产 vs 截图总盈亏 */}
-      <div className="pt-1.5 border-t border-border/50 space-y-1.5">
-        <label className="flex items-center gap-2 text-[11px]">
-          <span className="text-muted shrink-0">初始本金核准</span>
-          <input type="number" step="any" value={baseCap} onChange={e => onBaseCap(e.target.value)} placeholder="输入本金"
-            className="w-28 h-6.5 px-2 rounded bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
-          <span className="text-muted">→ 本金 - 总资产 =</span>
-          <span className={`tabular-nums font-medium ${pnlColor(calcPnl)}`}>{calcPnl != null ? fmtMoney(calcPnl) : '—'}</span>
-        </label>
-        {diff != null && (
-          <div className={`text-[10px] tabular-nums ${Math.abs(diff) < 1 ? 'text-emerald-400' : 'text-amber-400'}`}>
-            {Math.abs(diff) < 1
-              ? '✓ 与截图总盈亏一致'
-              : `⚠ 与截图总盈亏相差 ${fmtMoney(diff)}（本金口径或期间出入金）`}
-          </div>
-        )}
+      {/* 累计盈亏: 手动输入本金 - 出金 - 总资产 */}
+      <div className="pt-1.5 border-t border-border/50 flex items-center gap-2 text-[11px] flex-wrap">
+        <span className="text-muted">本金</span>
+        <input type="number" step="any" value={baseCap} onChange={e => onBaseCap(e.target.value)} placeholder="0"
+          className="w-24 h-6.5 px-2 rounded bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+        <span className="text-muted">出金</span>
+        <input type="number" step="any" value={outFlow} onChange={e => onOutFlow(e.target.value)} placeholder="0"
+          className="w-20 h-6.5 px-2 rounded bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+        <span className="text-muted">→ 累计盈亏 =</span>
+        <span className={`tabular-nums font-semibold text-sm ${pnlColor(cumPnl)}`}>{cumPnl != null ? fmtMoney(cumPnl) : '—'}</span>
       </div>
     </div>
   )
@@ -560,7 +559,15 @@ function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void;
   const [queue, setQueue] = useState<PickedImage[]>([])
   const [shotSummary, setShotSummary] = useState<ShotSummary | null>(null)
   const [baseCap, setBaseCap] = useState('')
+  const [outFlow, setOutFlow] = useState('')
   const [syncCash, setSyncCash] = useState(true)
+
+  // 本金默认读「我的持仓」资金设置, 免去每次手填
+  useEffect(() => {
+    api.holdingsSummary()
+      .then(r => { if (r.initial_cap > 0) setBaseCap(String(r.initial_cap)) })
+      .catch(() => {})
+  }, [])
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [provider, setProvider] = useState('')
@@ -671,28 +678,26 @@ function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void;
       return next
     })
 
-  const acceptCurrent = () => {
-    if (!cur) return
-    const kept = curRows.filter(r => curChecked.has(r.symbol) && r.symbol && Number(r.qty) >= 0)
-    setAcceptedRows(prev => [...prev, ...kept])
-  }
-
   const goNext = () => {
-    acceptCurrent()
+    if (!cur) return
+    // 局部变量传递, 避免 setState 异步导致汇总读到空 acceptedRows
+    const kept = curRows.filter(r => curChecked.has(r.symbol) && r.symbol && Number(r.qty) >= 0)
+    const mergedAccepted = [...acceptedRows, ...kept]
+    setAcceptedRows(mergedAccepted)
     const next = confirmIdx + 1
     if (next < results.length) {
       setConfirmIdx(next)
       setCurRows(results[next].rows)
       setCurChecked(new Set(results[next].rows.map(r => r.symbol)))
     } else {
-      enterSummary()
+      enterSummary(mergedAccepted)
     }
   }
 
-  const enterSummary = () => {
+  const enterSummary = (rows: Row[]) => {
     // 汇总去重: 同 symbol 保留数量大的
     const bySymbol = new Map<string, Row>()
-    for (const r of acceptedRows) {
+    for (const r of rows) {
       const prev = bySymbol.get(r.symbol)
       if (!prev || (Number(r.qty) || 0) > (Number(prev.qty) || 0)) bySymbol.set(r.symbol, r)
     }
@@ -869,6 +874,8 @@ function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void;
                 s={shotSummary}
                 baseCap={baseCap}
                 onBaseCap={setBaseCap}
+                outFlow={outFlow}
+                onOutFlow={setOutFlow}
               />}
               <div className="pt-1 space-y-2 border-t border-border/60">
                 <button onClick={goNext}
@@ -891,7 +898,7 @@ function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void;
                 className="text-[11px] text-accent hover:underline">重新选图</button>
             </div>
             {renderRows(summaryRows, summaryChecked, toggleSummary, updateSummary, s => setSummaryRows(prev => prev.filter(x => x.symbol !== s)))}
-            {shotSummary && <ShotSummaryBlock s={shotSummary} baseCap={baseCap} onBaseCap={setBaseCap} />}
+            {shotSummary && <ShotSummaryBlock s={shotSummary} baseCap={baseCap} onBaseCap={setBaseCap} outFlow={outFlow} onOutFlow={setOutFlow} />}
             <div className="pt-1 space-y-2 border-t border-border/60">
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-secondary shrink-0">导入日期</span>
