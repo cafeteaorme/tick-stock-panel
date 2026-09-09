@@ -245,6 +245,10 @@ export interface WatchlistImportCandidate {
   market?: string
   /** 持仓数量 (股) */
   qty?: number | null
+  /** 可用数量 (股) */
+  available?: number | null
+  /** stockocr 本地扫描交叉验证: true 通过 / false 未匹配 / null 不可验证 */
+  verified?: boolean | null
   /** 成本价 */
   cost?: number | null
 }
@@ -1448,7 +1452,10 @@ export const api = {
       body: JSON.stringify({ symbols, note }),
     }),
   watchlistOcrStatus: () =>
-    request<{ provider: string; available: boolean }>('/api/watchlist/ocr-status'),
+    request<{ provider: string; available: boolean; engines?: { tesseract: boolean; ai_vision: boolean }; ai_vision_model?: string; ai_vision_reason?: string }>('/api/watchlist/ocr-status'),
+  /** 最近截图/照片 (下载/桌面/图片/图库已授权时), 供导入弹窗快捷选图 */
+  recentPhotos: (limit = 24) =>
+    request<{ photos: { name: string; source: string; date: string; url: string }[] }>(`/api/watchlist/recent-photos?limit=${limit}`),
 
   // ---------------- 我的持仓 ----------------
   holdingsList: (includeClosed = false) =>

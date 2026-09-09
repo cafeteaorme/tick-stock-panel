@@ -8,6 +8,7 @@ import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { toast } from '@/components/Toast'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
+import { RecentPhotoStrip, type PickedImage } from '@/components/imports/RecentPhotoStrip'
 import type { ECharts } from 'echarts'
 
 /* ================================================================
@@ -34,6 +35,11 @@ const pnlColor = (v: number | null | undefined) =>
 const REGION_BADGE: Record<string, { label: string; cls: string }> = {
   HK: { label: '港', cls: 'bg-amber-500/12 text-amber-500 border-amber-500/25' },
   US: { label: 'US', cls: 'bg-sky-500/12 text-sky-400 border-sky-500/25' },
+}
+
+function todayIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /* ================================================================
@@ -487,49 +493,99 @@ function AddDialog({ onClose }: { onClose: () => void }) {
 function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
+  const [queue, setQueue] = useState<PickedImage[]>([])
   const [busy, setBusy] = useState(false)
-  const [candidates, setCandidates] = useState<any[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [step, setStep] = useState<'pick' | 'confirm' | 'date'>('pick')
-  // 日期选择器状态
-  const [view, setView] = useState<'day' | 'month' | 'year'>('day')
-  const [pickY, setPickY] = useState(new Date().getFullYear())
-  const [pickM, setPickM] = useState(new Date().getMonth() + 1)
-  const [pickD, setPickD] = useState<number | null>(null)
+  const [progress, setProgress] = useState('')
+  const [step, setStep] = useState<'pick' | 'confirm'>('pick')
+  const [provider, setProvider] = useState('')
+
+  interface Row { symbol: string; name: string; market: string; qty: string; available: string; cost: string; verified?: boolean | null }
+  const [rows, setRows] = useState<Row[]>([])
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [importDate, setImportDate] = useState(todayIso())
   const [cash, setCash] = useState('')
 
-  const today = new Date()
-  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const isToday = importDate === todayIso()
 
-  const recognize = async (files: FileList | null) => {
-    const file = files?.[0]
-    if (!file) return
-    setBusy(true)
-    try {
-      const res = await api.watchlistImportImage(file, undefined, true)
-      if (genRef.current) return
-      const matched = res.candidates.filter((c: any) => c.matched && c.symbol && c.qty)
-      setCandidates(res.candidates)
-      setSelected(new Set(matched.map((c: any) => c.symbol)))
-      setStep(res.candidates.length ? 'confirm' : 'pick')
-      if (!res.candidates.length) toast('未识别到持仓，请换更清晰的截图', 'error')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '识别失败', 'error')
-    } finally {
-      setBusy(false)
-    }
+  const addImages = (imgs: PickedImage[]) => {
+    setQueue(prev => {
+      const seen = new Set(prev.map(i => i.key))
+      const merged = [...prev]
+      for (const im of imgs) {
+        if (!seen.has(im.key)) { merged.push(im); seen.add(im.key) }
+      }
+      return merged
+    })
   }
-  const genRef = useRef(0)
 
-  const chosenDate = pickD ? `${pickY}-${String(pickM).padStart(2, '0')}-${String(pickD).padStart(2, '0')}` : null
-  const isToday = chosenDate === todayIso
+  const recognizeAll = async () => {
+    if (queue.length === 0) { toast('请先选择截图', 'error'); return }
+    setBusy(true)
+    const collected: Row[] = []
+    let latestDate = ''
+    for (let i = 0; i < queue.length; i++) {
+      setProgress(`识别中 ${i + 1}/${queue.length}…`)
+      try {
+        const res = await api.watchlistImportImage(queue[i].file, undefined, true)
+        setProvider(res.provider)
+        for (const c of res.candidates) {
+          if (!c.matched || !c.symbol) continue
+          collected.push({
+            symbol: c.symbol,
+            name: c.name || c.symbol,
+            market: c.market || 'CN',
+            qty: c.qty != null ? String(c.qty) : '',
+            available: c.available != null ? String(c.available) : '',
+            cost: c.cost != null ? String(c.cost) : '',
+            verified: c.verified ?? null,
+          })
+        }
+        if (queue[i].date > latestDate) latestDate = queue[i].date
+      } catch (e) {
+        toast(e instanceof Error ? e.message : `第 ${i + 1} 张识别失败`, 'error')
+      }
+    }
+    setProgress('')
+    setBusy(false)
+    if (collected.length === 0) {
+      toast('未识别到持仓记录，请换更清晰的截图', 'error')
+      return
+    }
+    // 按 symbol 去重 (多图同一持仓取数量大的那张)
+    const bySymbol = new Map<string, Row>()
+    for (const r of collected) {
+      const prev = bySymbol.get(r.symbol)
+      if (!prev || (Number(r.qty) || 0) > (Number(prev.qty) || 0)) bySymbol.set(r.symbol, r)
+    }
+    const finalRows = [...bySymbol.values()]
+    setRows(finalRows)
+    setChecked(new Set(finalRows.map(r => r.symbol)))
+    if (latestDate) setImportDate(latestDate)
+    setStep('confirm')
+  }
+
+  const updateRow = (symbol: string, patch: Partial<Row>) =>
+    setRows(prev => prev.map(r => (r.symbol === symbol ? { ...r, ...patch } : r)))
+
+  const toggleRow = (symbol: string) =>
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
 
   const doImport = useMutation({
     mutationFn: () => api.holdingsImport(
-      candidates
-        .filter(c => selected.has(c.symbol) && c.qty)
-        .map(c => ({ symbol: c.symbol, qty: c.qty, available: c.available ?? undefined, cost: c.cost ?? undefined })),
-      chosenDate ?? undefined,
+      rows
+        .filter(r => checked.has(r.symbol) && r.symbol && Number(r.qty) > 0)
+        .map(r => ({
+          symbol: r.symbol,
+          qty: Number(r.qty),
+          available: r.available ? Number(r.available) : undefined,
+          cost: r.cost ? Number(r.cost) : undefined,
+        })),
+      importDate,
       cash ? Number(cash) : undefined,
     ),
     onSuccess: (res) => {
@@ -543,158 +599,131 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
     },
   })
 
-  const toggle = (sym: string) => setSelected(prev => {
-    const next = new Set(prev)
-    if (next.has(sym)) next.delete(sym)
-    else next.add(sym)
-    return next
-  })
-
-  // 日历 grid
-  const first2 = new Date(pickY, pickM - 1, 1)
-  const gridStart2 = new Date(first2)
-  gridStart2.setDate(1 - ((first2.getDay() + 6) % 7))
-  const dayCells: (string | null)[] = []
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(gridStart2)
-    d.setDate(gridStart2.getDate() + i)
-    dayCells.push(d.getMonth() === pickM - 1
-      ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      : null)
-  }
-  const futureDisabled = (iso: string) => iso > todayIso
+  const selectedCount = rows.filter(r => checked.has(r.symbol) && r.symbol && Number(r.qty) > 0).length
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative rounded-card border border-border bg-surface shadow-2xl w-[24rem] max-w-[92vw] max-h-[86vh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+      <div className="relative rounded-card border border-border bg-surface shadow-2xl w-[26rem] max-w-[94vw] max-h-[88vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
           <div className="text-sm font-semibold text-foreground">截图导入持仓</div>
           <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {step === 'pick' && (
-            <div>
-              <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={e => { recognize(e.target.files); e.target.value = '' }} />
-              <button onClick={() => inputRef.current?.click()} disabled={busy}
-                className="w-full flex flex-col items-center gap-2 rounded-btn border border-dashed border-border bg-elevated/40 hover:bg-elevated/70 px-4 py-8 text-secondary">
-                {busy ? <Loader2 className="h-6 w-6 animate-spin text-accent" /> : <Camera className="h-6 w-6 text-accent" />}
-                <span className="text-xs">{busy ? '识别中…' : '点击选择券商持仓截图'}</span>
-                <span className="text-[10px] text-muted">AI 识别名称/数量/可用/成本，A股/港股/美股均支持</span>
+            <>
+              <RecentPhotoStrip pickedKeys={new Set(queue.map(q => q.key))} onPick={im => addImages([im])} />
+              <input
+                ref={inputRef}
+                type="file"
+                multiple
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={e => {
+                  const files = Array.from(e.target.files ?? [])
+                  addImages(files.map(f => ({
+                    file: f,
+                    date: f.lastModified ? new Date(f.lastModified).toISOString().slice(0, 10) : todayIso(),
+                    key: `file:${f.name}:${f.lastModified}`,
+                  })))
+                  e.target.value = ''
+                }}
+              />
+              <button onClick={() => inputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 rounded-btn border border-dashed border-border bg-elevated/40 hover:bg-elevated/70 px-4 py-3 text-xs text-secondary">
+                <Camera className="h-4 w-4 text-accent" />或从文件夹选择（支持多选）
               </button>
-            </div>
+
+              {queue.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[11px] text-secondary">已选 {queue.length} 张{provider ? ` · 引擎 ${provider}` : ''}</div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {queue.map(q => (
+                      <div key={q.key} className="relative shrink-0 w-16 h-20 rounded-btn overflow-hidden border border-border">
+                        <img src={URL.createObjectURL(q.file)} alt={q.file.name} className="w-full h-full object-cover" />
+                        <button
+                          onClick={() => setQueue(prev => prev.filter(x => x.key !== q.key))}
+                          className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/60 text-white"
+                        ><X className="h-3 w-3" /></button>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={recognizeAll} disabled={busy}
+                    className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+                    {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {busy ? progress : `开始识别（${queue.length} 张）`}
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
           {step === 'confirm' && (
             <>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-secondary">识别 {candidates.length} 条 · 勾选 {selected.size} 条</span>
-                <button onClick={() => setStep('pick')} className="text-[11px] text-accent hover:underline">重新选图</button>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-secondary">识别 {rows.length} 条 · 勾选 {selectedCount} 条</span>
+                <button onClick={() => setStep('pick')} className="text-[11px] text-accent hover:underline">继续加图</button>
               </div>
-              <ul className="divide-y divide-border/60 rounded-btn border border-border overflow-hidden max-h-64 overflow-y-auto">
-                {candidates.map(c => {
-                  const disabled = !c.matched || !c.qty
-                  const checked = selected.has(c.symbol)
-                  return (
-                    <li key={c.symbol || c.code}>
-                      <label className={`flex items-center gap-3 px-3 py-2 text-xs ${disabled ? 'opacity-50' : 'cursor-pointer hover:bg-elevated/50'}`}>
-                        <input type="checkbox" disabled={disabled} checked={checked} onChange={() => toggle(c.symbol)} className="rounded border-border" />
-                        <span className="flex-1 min-w-0 truncate">
-                          <span className="text-foreground font-medium">{c.name || c.symbol}</span>
-                          <span className="text-muted ml-1.5">{c.qty ? `${c.qty}股` : '无数量'}</span>
-                          {c.cost ? <span className="text-muted ml-1.5">成本 {c.cost}</span> : null}
-                          {c.available != null && c.available !== c.qty ? <span className="text-muted ml-1.5">可用 {c.available}</span> : null}
-                        </span>
-                        {c.market && c.market !== 'CN' && (
-                          <span className="text-[9px] px-1 rounded bg-sky-500/12 text-sky-400">{c.market}</span>
-                        )}
-                      </label>
-                    </li>
-                  )
-                })}
-              </ul>
-              <button disabled={selected.size === 0} onClick={() => setStep('date')}
-                className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40">
-                下一步：选择日期 ({selected.size})
-              </button>
-            </>
-          )}
-
-          {step === 'date' && (
-            <>
-              {/* 级联日期选择: 年 → 月 → 日 (同图1交互) */}
-              <div className="flex items-center justify-center gap-1 py-1">
-                <button onClick={() => setView('year')} className={`px-3 py-1.5 rounded-btn text-sm font-semibold ${view === 'year' ? 'bg-accent/15 text-accent' : 'text-secondary hover:bg-elevated'}`}>
-                  {pickY}年
-                  <ChevronDown className="inline h-3 w-3 ml-0.5" />
-                </button>
-                <button onClick={() => setView('month')} className={`px-3 py-1.5 rounded-btn text-sm font-semibold ${view === 'month' ? 'bg-accent/15 text-accent' : 'text-secondary hover:bg-elevated'}`}>
-                  {pickM}月
-                  <ChevronDown className="inline h-3 w-3 ml-0.5" />
-                </button>
-                <span className={`px-3 py-1.5 text-sm font-semibold ${view === 'day' ? 'text-foreground' : 'text-muted'}`}>{pickD ? `${pickD}日` : '选日'}</span>
-              </div>
-
-              {view === 'year' && (
-                <div className="grid grid-cols-4 gap-1.5">
-                  {Array.from({ length: 8 }, (_, i) => today.getFullYear() - 7 + i).map(y2 => (
-                    <button key={y2} onClick={() => { setPickY(y2); setView('month') }}
-                      className={`py-2.5 rounded-btn text-sm tabular-nums ${y2 === pickY ? 'bg-accent/15 text-accent font-semibold' : 'text-secondary hover:bg-elevated'}`}>
-                      {y2}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {view === 'month' && (
-                <div className="grid grid-cols-4 gap-1.5">
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map(m2 => (
-                    <button key={m2} onClick={() => { setPickM(m2); setView('day') }}
-                      className={`py-2.5 rounded-btn text-sm tabular-nums ${m2 === pickM ? 'bg-accent/15 text-accent font-semibold' : 'text-secondary hover:bg-elevated'}`}>
-                      {m2}月
-                    </button>
-                  ))}
-                </div>
-              )}
-              {view === 'day' && (
-                <>
-                  <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted mb-1">
-                    {['一', '二', '三', '四', '五', '六', '日'].map(d => <div key={d}>{d}</div>)}
+              {/* 确认: 每行 勾选 | 名称 | 数量 | 可用 | 成本 | 删除, 全部可编辑 */}
+              <div className="space-y-1.5">
+                {rows.map(r => (
+                  <div key={r.symbol} className={`flex items-center gap-1.5 text-xs rounded-btn border px-2 py-1.5 ${checked.has(r.symbol) ? 'border-border bg-elevated/40' : 'border-border/40 opacity-50'}`}>
+                    <input type="checkbox" checked={checked.has(r.symbol)} onChange={() => toggleRow(r.symbol)} className="rounded border-border shrink-0" />
+                    <span className="w-20 shrink-0 truncate font-medium text-foreground" title={`${r.name} ${r.symbol}${r.verified == null ? '' : r.verified ? ' · stockocr 本地扫描验证通过' : ' · 本地扫描未验证到，请核对'}`}>
+                      {r.name}
+                      {r.verified != null && (
+                        <span className={`ml-0.5 text-[10px] ${r.verified ? 'text-emerald-400' : 'text-amber-400'}`}>{r.verified ? '✓' : '⚠'}</span>
+                      )}
+                    </span>
+                    <input type="number" step="any" value={r.qty} placeholder="数量" onChange={e => updateRow(r.symbol, { qty: e.target.value })}
+                      className="w-16 px-1.5 h-7 rounded bg-base border border-border text-right tabular-nums focus:outline-none focus:border-accent/50" />
+                    <input type="number" step="any" value={r.available} placeholder="可用" onChange={e => updateRow(r.symbol, { available: e.target.value })}
+                      className="w-16 px-1.5 h-7 rounded bg-base border border-border text-right tabular-nums focus:outline-none focus:border-accent/50" />
+                    <input type="number" step="any" value={r.cost} placeholder="成本" onChange={e => updateRow(r.symbol, { cost: e.target.value })}
+                      className="w-20 px-1.5 h-7 rounded bg-base border border-border text-right tabular-nums focus:outline-none focus:border-accent/50" />
+                    <button onClick={() => setRows(prev => prev.filter(x => x.symbol !== r.symbol))}
+                      className="p-1 rounded-btn text-secondary hover:text-danger shrink-0" title="移除"><X className="h-3.5 w-3.5" /></button>
                   </div>
-                  <div className="grid grid-cols-7 gap-1">
-                    {dayCells.map((iso, i) => {
-                      if (!iso) return <div key={i} />
-                      const disabled = futureDisabled(iso)
-                      const sel = pickD === Number(iso.slice(8)) || (pickD == null && iso === todayIso)
-                      return (
-                        <button key={iso} disabled={disabled}
-                          onClick={() => setPickD(Number(iso.slice(8)))}
-                          className={`aspect-square rounded-md text-xs tabular-nums flex items-center justify-center
-                            ${disabled ? 'text-muted/40 cursor-not-allowed' : sel ? 'bg-accent text-white font-semibold' : 'text-foreground hover:bg-elevated'}`}>
-                          {Number(iso.slice(8))}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </>
-              )}
-
-              {chosenDate && !isToday && (
-                <label className="flex flex-col gap-1.5 text-xs">
-                  <span className="text-secondary">该日可用资金（现金，可选；用于收益分段回算）</span>
-                  <input type="number" step="any" value={cash} onChange={e => setCash(e.target.value)} placeholder="留空则沿用当前资金"
-                    className="h-9 px-2.5 rounded-btn bg-base border border-border tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
-                </label>
-              )}
-              <div className="text-[11px] text-muted rounded-btn bg-elevated/40 px-3 py-2">
-                {chosenDate == null ? '请选择导入日期' : isToday
-                  ? `${chosenDate}（今日）→ 直接更新当前持仓`
-                  : `${chosenDate}（历史）→ 存为该日快照，收益按快照分段回算`}
+                ))}
+                <button
+                  onClick={() => {
+                    const sym = window.prompt('输入代码 (如 688825.SH / 00700.HK)')
+                    if (!sym) return
+                    const s = sym.trim().toUpperCase()
+                    if (rows.some(r => r.symbol === s)) { toast('该代码已在列表', 'error'); return }
+                    setRows(prev => [...prev, { symbol: s, name: s, market: 'CN', qty: '', available: '', cost: '' }])
+                    setChecked(prev => new Set([...prev, s]))
+                  }}
+                  className="w-full py-1.5 rounded-btn border border-dashed border-border text-[11px] text-muted hover:text-secondary hover:border-accent/40"
+                >+ 添加持仓</button>
               </div>
-              <button disabled={!chosenDate || doImport.isPending} onClick={() => doImport.mutate()}
-                className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+
+              <div className="pt-1 space-y-2 border-t border-border/60">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-secondary shrink-0">导入日期</span>
+                  <input type="date" value={importDate} max={todayIso()} onChange={e => setImportDate(e.target.value)}
+                    className="flex-1 h-8 px-2 rounded-btn bg-base border border-border tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+                </div>
+                {!isToday && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-secondary shrink-0">当日现金</span>
+                    <input type="number" step="any" value={cash} onChange={e => setCash(e.target.value)} placeholder="可选，用于分段回算"
+                      className="flex-1 h-8 px-2 rounded-btn bg-base border border-border tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+                  </div>
+                )}
+                <div className="text-[11px] text-muted rounded-btn bg-elevated/40 px-3 py-1.5">
+                  {isToday ? '今日截图 → 直接更新当前持仓' : `${importDate}（历史）→ 存为该日快照，收益按快照分段回算`}
+                </div>
+              </div>
+
+              <button
+                disabled={selectedCount === 0 || doImport.isPending}
+                onClick={() => doImport.mutate()}
+                className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5"
+              >
                 {doImport.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                {isToday ? '导入持仓' : '存入历史快照'}
+                {isToday ? `导入持仓（${selectedCount}）` : `存入 ${importDate} 快照（${selectedCount}）`}
               </button>
             </>
           )}
@@ -703,7 +732,6 @@ function HoldingsImportDialog({ onClose }: { onClose: () => void }) {
     </div>
   )
 }
-
 /* ================================================================
  * 当日盈亏明细弹窗 (日历点击)
  * ================================================================ */

@@ -1,9 +1,15 @@
 """AI 视觉识别 Provider — 用多模态模型识别持仓截图 (支持 A股/港股/美股)。
 
-复用设置页已配置的 openai 兼容客户端 (base_url / api_key / model)。
-识别结果转成与 Tesseract 相同的「文本行」形态, 交由 pipeline 统一解析:
-每行输出 `市场 代码 名称 数量 成本价`, 港股 4-5 位码与美股字母码
-由字典校验, 与 Tesseract 通道共用一套下游逻辑。
+复用设置页已配置的 openai 兼容客户端。模型解析优先级:
+1. 设置项 ai_vision_model (显式指定)
+2. 当前模型名含 vision → 直接用
+3. /models 列表里第一个名字含 vision 的模型 (如 deepseek-v4-flash-vision-exp)
+4. 找不到 → 不可用 (reason: no_vision_model)
+
+识别要点 (实测 deepseek-v4-flash-vision-exp):
+- reasoning 模型, max_tokens 必须 ≥8000 否则推理耗尽 quota 后 content 为空
+- 输入用原始彩色图 (不要反相), 长边压到 ~2200px
+- 输出行可能混入 <think>/markdown 围栏, 由 _clean_model_output 剥离
 """
 from __future__ import annotations
 
@@ -11,35 +17,46 @@ import asyncio
 import base64
 import logging
 import re
+from functools import lru_cache
+from io import BytesIO
 from ipaddress import ip_address
 from urllib.parse import urlsplit
 
-from app.services.watchlist_ocr.provider import OcrProvider, preprocess_for_ocr
+from PIL import Image
+
+from app.services.watchlist_ocr.provider import OcrProvider
 
 logger = logging.getLogger(__name__)
 
-_PROMPT = """你是券商持仓截图识别器。逐行读出图中每一条持仓记录。
+_PROMPT = """识别这张券商持仓截图中的每一条持仓记录。只输出 JSON 数组, 每条一个对象:
+[{"market":"CN|HK|US","code":"图中可见的代码,不可见用null","name":"名称原文","qty":持仓数量,"available":可用数量,"cost":成本价}]
 
-输出格式 (每行一条, 用空格分隔, 不要输出任何其他内容、不要思考过程、不要 markdown):
-市场 代码 名称 数量 可用 成本价
+说明:
+- market 按交易所/货币/代码形态判断 (6位数字=CN, 4-5位数字=HK, 字母=US)
+- 数量取「持仓」列, 可用取「可用」列; cost 忽略货币符号保留全部小数位
+- 某字段确实看不到就用 null; 已清仓 (数量 0) 的行也要输出
+不要输出 JSON 以外的任何内容。"""
 
-- 市场: CN(A股) / HK(港股) / US(美股)。按交易所/货币/代码形态判断 (6位数字=CN, 4-5位数字=HK, 字母=US)。
-- 代码: 图中可见则原样照抄; 图中不显示代码则输出 -
-- 名称: 必填, 保留图中原文 (如 长鑫科技、MINIMAX-W)
-- 数量: 持仓股数纯数字 (持仓/可用两列取「持仓」列), 没有则输出 -
-- 可用: 可用股数纯数字, 没有则输出 -
-- 成本价: 成本/买入价纯数字, 没有则输出 -
-只输出图里确凿可见的持仓行, 不要编造, 不要输出表头。"""
-
-# 只保留符合「市场 代码 名称 …」格式的数据行, 防止模型思考文本混入下游解析
 _DATA_LINE_RE = re.compile(r"^\s*(CN|HK|US)\s+\S+\s+\S+.*$")
 
 
 def _clean_model_output(text: str) -> str:
-    """剥离 <think> 推理与 markdown 围栏, 只保留符合数据行格式的行。"""
+    """剥离 <think> 推理与围栏, 提取 JSON 数组 (AI 通道输出); 无 JSON 时退回数据行格式。"""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r"<think>.*", "", text, flags=re.DOTALL | re.IGNORECASE)  # 未闭合的 think 块
-    text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"<think>.*", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"```[a-z]*", "", text, flags=re.IGNORECASE)
+    start = text.find("[")
+    end = text.rfind("]")
+    if start != -1 and end > start:
+        candidate = text[start : end + 1].strip()
+        try:
+            import json as _json
+
+            arr = _json.loads(candidate)
+            if isinstance(arr, list):
+                return candidate
+        except Exception:  # noqa: BLE001
+            pass
     lines = [ln.strip() for ln in text.splitlines()]
     return "\n".join(ln for ln in lines if _DATA_LINE_RE.match(ln))
 
@@ -58,15 +75,68 @@ def _validate_base_url_https_public() -> None:
     host = (parts.hostname or "").strip()
     if not host:
         raise RuntimeError("AI API 地址无效")
-    # 域名形态才放行内网域名检查; IP 形态直接判网段
     try:
         ip = ip_address(host)
         if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
             raise RuntimeError("AI 视觉识别不允许访问内网/环回地址")
     except ValueError:
-        # 域名: 拒绝明显的内网后缀
         if host.lower() in ("localhost",) or host.lower().endswith(".local") or host.lower().endswith(".internal"):
             raise RuntimeError("AI 视觉识别不允许访问内网地址")
+
+
+@lru_cache(maxsize=1)
+def _resolve_vision_model_cached() -> str:
+    """探测可用的视觉模型 (进程内缓存一次)。返回 '' 表示没有。"""
+    from app import secrets_store
+    from app.config import settings
+    from app.services.ai_provider import _openai_client, current_ai_model, normalize_openai_base_url
+
+    explicit = secrets_store.get_ai_config("ai_vision_model", "")
+    if explicit:
+        return explicit
+    cur = current_ai_model()
+    if "vision" in cur.lower():
+        return cur
+    try:
+        client = _openai_client(secrets_store.get_ai_key(), 20.0)
+
+        async def _probe() -> list[str]:
+            page = await client.models.list()
+            return [m.id for m in page.data]
+
+        import asyncio
+
+        for mid in asyncio.run(_probe()):
+            if "vision" in mid.lower():
+                return mid
+    except Exception as e:  # noqa: BLE001
+        logger.warning("vision model probe failed: %s", e)
+    _ = normalize_openai_base_url  # keep import meaningful for linters
+    return ""
+
+
+def resolve_vision_model() -> str:
+    try:
+        return _resolve_vision_model_cached()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def reset_vision_model_cache() -> None:
+    _resolve_vision_model_cached.cache_clear()
+
+
+def _prep_image(image_bytes: bytes, max_edge: int = 2200) -> Image.Image:
+    """AI 视觉输入预处理: 原始彩色, 只限长边 (不做反相/灰度 — 视觉模型原生处理暗色主题)。"""
+    img = Image.open(BytesIO(image_bytes))
+    if pixels := img.width * img.height:
+        if pixels > 12_000_000:
+            raise ValueError("图片分辨率过高,请裁剪后重试")
+    img.load()
+    img = img.convert("RGB")
+    if max(img.size) > max_edge:
+        img.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    return img
 
 
 class AiVisionOcrProvider(OcrProvider):
@@ -76,50 +146,69 @@ class AiVisionOcrProvider(OcrProvider):
 
     def available(self) -> bool:
         try:
-            from app.services.ai_provider import ai_configured, current_ai_provider, is_codex_cli_provider
+            from app.services.ai_provider import ai_configured, is_codex_cli_provider
 
             if is_codex_cli_provider():
-                return False  # codex CLI 通道不支持图片输入
-            return ai_configured()
+                return False
+            return bool(ai_configured() and resolve_vision_model())
         except Exception:  # noqa: BLE001
             return False
 
+    def unavailable_reason(self) -> str:
+        from app.services.ai_provider import ai_configured
+
+        if not ai_configured():
+            return "AI 未配置"
+        if not resolve_vision_model():
+            return "未找到视觉模型 (模型名需含 vision, 或在 AI 设置加 ai_vision_model)"
+        return ""
+
     def extract_text(self, image_bytes: bytes) -> str:
-        # import-image 端点已在 worker 线程中调用本方法 (anyio.to_thread), 线程内无事件循环
+        # import-image 端点已在 worker 线程中调用本方法, 线程内无事件循环
         return asyncio.run(self._extract_async(image_bytes))
 
     async def _extract_async(self, image_bytes: bytes) -> str:
         from app import secrets_store
-        from app.services.ai_provider import _openai_client, current_ai_model
+        from app.services.ai_provider import _openai_client
 
         _validate_base_url_https_public()
+        model = resolve_vision_model()
+        if not model:
+            raise RuntimeError("未找到可用的视觉模型 (当前模型不支持图片, 且模型列表中无 vision 模型)")
         ai_key = secrets_store.get_ai_key()
         if not ai_key:
             raise RuntimeError("AI API Key 未配置, 请在设置页配置")
 
-        img = preprocess_for_ocr(image_bytes)
-        from io import BytesIO
-
+        img = _prep_image(image_bytes)
         buf = BytesIO()
         img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-        client = _openai_client(ai_key, 180.0)
-        resp = await client.chat.completions.create(
-            model=current_ai_model(),
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _PROMPT},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                    ],
-                }
-            ],
-            max_tokens=2000,
-        )
-        text = (resp.choices[0].message.content or "").strip() if resp.choices else ""
-        return _clean_model_output(text)
+        client = _openai_client(ai_key, 240.0)
+        # reasoning 模型偶发把 token 耗尽在思考上 (content 为空) → 最多重试 2 次
+        last_err = "视觉模型未返回识别结果"
+        for attempt in range(2):
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _PROMPT},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        ],
+                    }
+                ],
+                max_tokens=8000,
+            )
+            text = (resp.choices[0].message.content or "").strip() if resp.choices else ""
+            cleaned = _clean_model_output(text)
+            if cleaned:
+                return cleaned
+            finish = resp.choices[0].finish_reason if resp.choices else None
+            last_err = f"{last_err} (finish={finish})"
+            logger.warning("ai_vision attempt %d empty (finish=%s), retrying", attempt + 1, finish)
+        raise RuntimeError(f"{last_err}。可重试一次, 或换更清晰的截图。")
 
 
 _provider_instance: AiVisionOcrProvider | None = None

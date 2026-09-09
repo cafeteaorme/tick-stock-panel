@@ -83,6 +83,17 @@ def _qty_value(num: str, unit: str | None) -> float:
     return v
 
 
+def _num_or_none(v) -> float | None:
+    """JSON 字段数值化: 接受 int/float/纯数字字符串, 其余 (含 -/null) 返回 None。"""
+    if v is None:
+        return None
+    try:
+        f = float(str(v).replace(",", "").replace("HK$", "").replace("$", "").replace("¥", ""))
+        return f if f == f else None  # NaN 防御
+    except (ValueError, TypeError):
+        return None
+
+
 def _parse_qty_cost(line: str) -> tuple[float | None, float | None]:
     """从单行提取 (数量, 成本价)。尽力而为的启发式:
     - 数量: 「100股」「1,000股」「×200」「2万」优先; 否则取无小数点的大整数 (≥10)
@@ -253,9 +264,10 @@ def _parse_ai_line(
                 symbol, code = hit, tok
                 continue
         # 数值 token: 小数 → 成本; 第一个整数 → 持仓数量; 第二个整数 → 可用数量
+        # 成本可能带货币前缀 (HK$1024.346 / $12.3 / ¥5.6), 剥离后解析
         try:
-            if "." in tok or "," in tok:
-                v = float(tok.replace(",", ""))
+            if "." in tok or "," in tok or "$" in tok or "¥" in tok:
+                v = float(re.sub(r"^(?:HK|US|CNY)?[$¥]", "", tok, flags=re.IGNORECASE).replace(",", ""))
                 if cost is None and 0.01 <= v <= 999999:
                     cost = v
             else:
@@ -505,20 +517,83 @@ def import_watchlist_image(
     existing = existing_symbols or set()
     all_names = {**symbol_to_name, **hk_us_names}
 
-    parsed = _parse_lines(text, code_to_symbol, hk_code, us_code, name_lookup)
-    candidates = [
-        ImportCandidate(
-            code=code,
-            symbol=symbol,
-            name=all_names.get(symbol),
-            matched=True,
-            market=market,
-            qty=qty,
-            cost=cost,
-            already_in_watchlist=bool(symbol in existing),
-        )
-        for code, market, symbol, qty, cost, _spans in parsed
-    ]
+    # AI 视觉通道输出 JSON 数组 → 结构化解析; 否则按行解析 (Tesseract 文本)
+    import json as _json
+
+    candidates: list[ImportCandidate] = []
+    stripped = (text or "").strip()
+    if stripped.startswith("["):
+        try:
+            items = _json.loads(stripped)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ai_vision JSON parse failed: %s", e)
+            items = []
+        for it in items if isinstance(items, list) else []:
+            if not isinstance(it, dict):
+                continue
+            market = str(it.get("market") or "CN").upper()
+            if market not in ("CN", "HK", "US"):
+                market = "CN"
+            name = str(it.get("name") or "").strip()
+            code = str(it.get("code") or "").strip()
+            qty = _num_or_none(it.get("qty"))
+            available = _num_or_none(it.get("available"))
+            cost = _num_or_none(it.get("cost"))
+            symbol = None
+            code_map = {"HK": hk_code, "US": us_code}.get(market)
+            if code:
+                upper = code.upper()
+                if market == "CN":
+                    symbol = code_to_symbol.get(upper) or code_to_symbol.get(upper.lstrip("0"))
+                elif code_map:
+                    symbol = code_map.get(upper) or code_map.get(upper.lstrip("0")) or code_map.get(upper.zfill(5))
+            if symbol is None and name:
+                normalized = re.sub(r"\s+", "", name)
+                best_same: tuple[str, str] | None = None
+                best_any: tuple[str, str] | None = None
+                for n, sym in name_lookup.items():
+                    if len(n) < 2 or n not in normalized:
+                        continue
+                    region = sym.rsplit(".", 1)[-1].upper()
+                    same = (region == market) or (market == "CN" and region not in ("HK", "US"))
+                    if same and (best_same is None or len(n) > len(best_same[0])):
+                        best_same = (n, sym)
+                    if best_any is None or len(n) > len(best_any[0]):
+                        best_any = (n, sym)
+                hit = best_same or best_any
+                symbol = hit[1] if hit else None
+            if symbol is None and code and market == "CN":
+                continue  # 编造的代码且名称对不上 → 丢弃
+            candidates.append(
+                ImportCandidate(
+                    code=code or name or "-",
+                    symbol=symbol,
+                    name=all_names.get(symbol) if symbol else (name or None),
+                    matched=symbol is not None,
+                    market=market,
+                    qty=qty,
+                    available=available,
+                    cost=cost,
+                    already_in_watchlist=bool(symbol and symbol in existing),
+                )
+            )
+    else:
+        parsed = _parse_lines(text, code_to_symbol, hk_code, us_code, name_lookup)
+        for code, market, symbol, qty, cost, _spans, *rest in parsed:
+            available = rest[0] if rest else None
+            candidates.append(
+                ImportCandidate(
+                    code=code,
+                    symbol=symbol,
+                    name=all_names.get(symbol),
+                    matched=True,
+                    market=market,
+                    qty=qty,
+                    available=available,
+                    cost=cost,
+                    already_in_watchlist=bool(symbol in existing),
+                )
+            )
 
     matched = [c for c in candidates if c.matched]
     unmatched = [c for c in candidates if not c.matched]

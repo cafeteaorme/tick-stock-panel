@@ -5,6 +5,7 @@ import { toast } from '@/components/Toast'
 import { api, type WatchlistImportCandidate } from '@/lib/api'
 import { useWatchlistBatchAdd } from '@/lib/useSharedMutations'
 import { getOcrInstallHint } from '@/lib/ocrInstallHint'
+import { RecentPhotoStrip, type PickedImage } from '@/components/imports/RecentPhotoStrip'
 
 interface Props {
   open: boolean
@@ -328,6 +329,11 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
               }}
             />
 
+            <RecentPhotoStrip
+              pickedKeys={new Set(previewUrls.map((_, i) => `recent:${i}`))}
+              onPick={(im: PickedImage) => onPick([im.file] as unknown as FileList)}
+            />
+
             <button
               type="button"
               disabled={busy || ocrAvailable === null}
@@ -405,6 +411,11 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-baseline gap-2">
                               <MarketTag market={c.market} />
+                              {c.verified != null && (
+                                <span className={`shrink-0 text-[10px] ${c.verified ? 'text-emerald-400' : 'text-amber-400'}`} title={c.verified ? 'stockocr 本地扫描验证通过' : '本地扫描未验证到，请核对'}>
+                                  {c.verified ? '✓' : '⚠'}
+                                </span>
+                              )}
                               <span className="font-medium text-foreground truncate">
                                 {c.name || (c.matched ? c.symbol : '未匹配')}
                               </span>

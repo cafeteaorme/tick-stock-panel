@@ -5,6 +5,7 @@ import logging
 import math
 import time
 from datetime import date
+from pathlib import Path
 
 import anyio
 import polars as pl
@@ -85,10 +86,15 @@ def ocr_status():
     """当前可用 OCR 引擎 (AI 视觉 + Tesseract 双通道, 前端可据此提示)。"""
     provider = get_ocr_provider()
     ai_available = False
+    ai_model = ""
+    ai_reason = ""
     try:
-        from app.services.watchlist_ocr.ai_vision import AiVisionOcrProvider
+        from app.services.watchlist_ocr.ai_vision import AiVisionOcrProvider, resolve_vision_model
 
-        ai_available = AiVisionOcrProvider().available()
+        ai_prov = AiVisionOcrProvider()
+        ai_available = ai_prov.available()
+        ai_model = resolve_vision_model()
+        ai_reason = "" if ai_available else ai_prov.unavailable_reason()
     except Exception:  # noqa: BLE001
         pass
     return {
@@ -98,7 +104,110 @@ def ocr_status():
             "tesseract": provider.available(),
             "ai_vision": ai_available,
         },
+        "ai_vision_model": ai_model,
+        "ai_vision_reason": ai_reason,
     }
+
+
+# ---------------------------------------------------------------- 最近图片 (导入快捷选择)
+
+
+def _photo_roots() -> list[Path]:
+    """可读的图片来源目录: 照片图库(若已被系统授权) + 下载/桌面/图片。"""
+    roots = [
+        Path.home() / "Pictures" / "Photos Library.photoslibrary" / "resources" / "derivatives",
+        Path.home() / "Downloads",
+        Path.home() / "Desktop",
+        Path.home() / "Pictures",
+    ]
+    return [r for r in roots if r.is_dir()]
+
+
+_PHOTO_EXTS = (".jpeg", ".jpg", ".png", ".webp")
+# 图库 derivatives 目录可深, 其他来源目录不递归
+_DERIV_MARKER = "photoslibrary"
+
+
+@router.get("/recent-photos")
+def recent_photos(limit: int = Query(24, ge=1, le=96)):
+    """最近的截图/照片 (供导入弹窗快捷选图): 图库(已授权时) + 下载/桌面/图片。"""
+    import os
+    from datetime import datetime as _dt
+
+    candidates: list[tuple[float, Path]] = []
+    seen: set[str] = set()
+    for root in _photo_roots():
+        is_deriv = _DERIV_MARKER in str(root)
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                depth = dirpath[len(str(root)):].count(os.sep)
+                if is_deriv and depth >= 3:
+                    dirnames[:] = []
+                    continue
+                elif not is_deriv and depth >= 1:
+                    dirnames[:] = []
+                    continue
+                for f in filenames:
+                    if not f.lower().endswith(_PHOTO_EXTS):
+                        continue
+                    p = Path(dirpath) / f
+                    key = str(p)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    try:
+                        candidates.append((p.stat().st_mtime, p))
+                    except OSError:
+                        continue
+        except Exception as e:  # noqa: BLE001
+            logger.debug("recent-photos skip %s: %s", root, e)
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    photos_root = (Path.home() / "Pictures" / "Photos Library.photoslibrary").resolve()
+    photos = []
+    for mtime, path in candidates[:limit]:
+        pr = path.resolve()
+        in_lib = str(pr).startswith(str(photos_root))
+        rel = pr.relative_to(photos_root).as_posix() if in_lib else pr.name
+        url = (
+            f"/api/watchlist/recent-photos/file?name={rel}"
+            if in_lib else f"/api/watchlist/recent-photos/file?ext={rel}"
+        )
+        photos.append({
+            "name": rel,
+            "source": "library" if in_lib else "fs",
+            "date": _dt.fromtimestamp(mtime).strftime("%Y-%m-%d"),
+            "url": url,
+        })
+    return {"photos": photos}
+
+
+@router.get("/recent-photos/file")
+def recent_photo_file(name: str = Query(""), ext: str = Query("")):
+    """返回候选图片。name=图库内相对路径; ext=下载/桌面/图片下的文件名 (仅一级)。"""
+    from fastapi.responses import FileResponse
+
+    if name:
+        root = (Path.home() / "Pictures" / "Photos Library.photoslibrary").resolve()
+        target = (root / name).resolve()
+        if not str(target).startswith(str(root)):
+            raise HTTPException(403, "非法路径")
+    elif ext:
+        target = None
+        for base in (Path.home() / "Downloads", Path.home() / "Desktop", Path.home() / "Pictures"):
+            cand = (base / ext).resolve()
+            if str(cand).startswith(str(base)) and cand.is_file():
+                target = cand
+                break
+        if target is None:
+            raise HTTPException(404, "图片不存在")
+    else:
+        raise HTTPException(400, "缺少参数")
+
+    if target.suffix.lower() not in _PHOTO_EXTS or not target.is_file():
+        raise HTTPException(404, "图片不存在")
+    media = "image/png" if target.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(target, media_type=media)
 
 
 @router.post("/import-image")
@@ -126,6 +235,17 @@ async def import_from_image(request: Request, file: UploadFile = File(...)):
             lambda: import_watchlist_image(data, data_dir, existing_symbols=existing),
             limiter=_OCR_LIMITER,
         )
+        # stockocr 本地扫描交叉验证 (AI 通道识别后; 失败/未安装不影响识别结果)
+        if result.get("provider") == "ai_vision" and result.get("candidates"):
+            from app.services.watchlist_ocr import verifier
+
+            verify = await anyio.to_thread.run_sync(
+                lambda: verifier.verify_candidates(data, result["candidates"]),
+                limiter=_OCR_LIMITER,
+            )
+            if verify is not None:
+                result["verify"] = verify
+            result["stockocr_available"] = verifier.stockocr_available()
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except RuntimeError as e:
