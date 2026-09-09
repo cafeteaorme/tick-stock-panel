@@ -1389,6 +1389,18 @@ export function Holdings() {
   const [previewName, setPreviewName] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('market_value')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('tf-holdings-hidden-cols') || '[]')) }
+    catch { return new Set() }
+  })
+  const [showColMenu, setShowColMenu] = useState(false)
+  const toggleCol = (k: string) => {
+    const next = new Set(hiddenCols)
+    if (next.has(k)) next.delete(k)
+    else next.add(k)
+    setHiddenCols(next)
+    localStorage.setItem('tf-holdings-hidden-cols', JSON.stringify([...next]))
+  }
 
   // 账户
   const accountsQ = useQuery({
@@ -1442,6 +1454,11 @@ export function Holdings() {
       return api.holdingsBenchmark(`${year}-01-01`, st.benchmark)
     },
     enabled: tab === 'year' && !!activeAcc,
+  })
+  // 账本权威月度收益 (投资账本缓存)
+  const historyData = useQuery({
+    queryKey: ['holdings-tzzb-history-data'],
+    queryFn: api.holdingsTzzbHistoryData,
   })
 
   const rows = useMemo(() => {
@@ -1687,6 +1704,29 @@ export function Holdings() {
             <TrendingUp className="h-4 w-4 text-accent" />
             <span className="text-sm font-semibold text-foreground">持仓明细</span>
             <span className="text-[10px] text-muted">点列名排序 · 点行查看个股</span>
+            <div className="flex-1" />
+            <div className="relative">
+              <button onClick={() => setShowColMenu(v => !v)} className="text-[11px] text-secondary hover:text-foreground">
+                列显示
+              </button>
+              {showColMenu && (
+                <div className="absolute right-0 top-full mt-1 z-20 w-40 rounded-btn border border-border bg-surface shadow-xl p-2 space-y-1">
+                  {sortHeaders.map(h => (
+                    <label key={h.key} className="flex items-center gap-2 text-xs px-1.5 py-1 rounded hover:bg-elevated cursor-pointer">
+                      <input type="checkbox"
+                        checked={!hiddenCols.has(h.key)}
+                        onChange={() => toggleCol(h.key)}
+                        className="rounded border-border" />
+                      {h.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => window.open(`/api/holdings/export/holdings.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')}
+              className="text-[11px] text-accent hover:underline"
+            >导出 CSV</button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]">
@@ -1720,22 +1760,22 @@ export function Holdings() {
                           <span className="font-mono text-muted text-xs">{r.symbol}</span>
                         </div>
                       </td>
-                      <td className={`px-3 py-2.5 tabular-nums font-medium ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</td>
-                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-foreground">{fmtMoney(r.market_value)}</td>
-                      <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.float_pnl)}`}>
+                      {!hiddenCols.has('price') && <td className={`px-3 py-2.5 tabular-nums font-medium ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</td>}
+                      {!hiddenCols.has('change_pct') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>}
+                      {!hiddenCols.has('qty') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>}
+                      {!hiddenCols.has('avg_cost') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>}
+                      {!hiddenCols.has('market_value') && <td className="px-3 py-2.5 tabular-nums text-foreground">{fmtMoney(r.market_value)}</td>}
+                      {!hiddenCols.has('float_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.float_pnl)}`}>
                         {fmtMoney(r.float_pnl)}<span className="text-[11px] font-normal ml-1">{fmtPct(r.float_pnl_pct)}</span>
-                      </td>
-                      <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{fmtMoney(r.day_pnl)}</td>
-                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.pre_profit)}`}>{fmtMoney(r.pre_profit)}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.hold_days != null ? Math.round(r.hold_days) : '—'}</td>
-                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m1_rate)}`}>{fmtPct(r.m1_rate)}</td>
-                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>
-                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>
-                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>
+                      </td>}
+                      {!hiddenCols.has('day_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{fmtMoney(r.day_pnl)}</td>}
+                      {!hiddenCols.has('pre_profit') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.pre_profit)}`}>{fmtMoney(r.pre_profit)}</td>}
+                      {!hiddenCols.has('hold_days') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.hold_days != null ? Math.round(r.hold_days) : '—'}</td>}
+                      {!hiddenCols.has('m1_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m1_rate)}`}>{fmtPct(r.m1_rate)}</td>}
+                      {!hiddenCols.has('m3_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>}
+                      {!hiddenCols.has('m6_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>}
+                      {!hiddenCols.has('m12_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>}
+                      {!hiddenCols.has('position_rate') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>}
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <button onClick={() => setEditing(r)} className="p-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated" title="编辑/卖出"><Pencil className="h-3.5 w-3.5" /></button>
@@ -1855,15 +1895,29 @@ export function Holdings() {
               {tab === 'day' && <span className={`text-xs tabular-nums font-medium ${pnlColor(todayPnl)}`}>今日 {fmtMoney(todayPnl)}</span>}
               {tab === 'month' && <span className={`text-xs tabular-nums font-medium ${pnlColor(monthPnl)}`}>本月 {fmtMoney(monthPnl)}</span>}
               {tab === 'year' && <span className={`text-xs tabular-nums font-medium ${pnlColor(yearPnl)}`}>本年 {fmtMoney(yearPnl)}</span>}
+              {tab === 'year' && (historyData.data?.yearly?.length ?? 0) > 0 && (() => {
+                const y = historyData.data!.yearly?.find(yy => yy.period === String(year))
+                return y ? (
+                  <span className={`text-xs tabular-nums ${pnlColor(y.pnl)}`}>账本 {fmtMoney(y.pnl)}</span>
+                ) : null
+              })()}
             </div>
           </div>
 
           {pnl.isLoading ? (
             <div className="h-48 flex items-center justify-center text-xs text-muted"><Loader2 className="h-4 w-4 animate-spin mr-2" />收益计算中…</div>
           ) : tab === 'day' ? (
-            <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} />
+            <>
+              <div className="flex justify-end mb-1">
+                <button
+                  onClick={() => window.open(`/api/holdings/export/pnl.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')}
+                  className="text-[11px] text-accent hover:underline"
+                >导出日收益 CSV</button>
+              </div>
+              <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} />
+            </>
           ) : tab === 'month' ? (
-            <MonthlyBars monthly={pnl.data?.monthly ?? []} />
+            <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
           ) : (
             <AssetCurve daily={pnl.data?.daily ?? []} benchmark={benchmark.data} />
           )}

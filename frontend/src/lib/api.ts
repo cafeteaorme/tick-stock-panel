@@ -1536,12 +1536,12 @@ export const api = {
     request<{ ok: boolean; source?: string; message: string }>('/api/holdings/tzzb/autocookie', { method: 'POST' }),
   holdingsTzzbClear: () =>
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
+  holdingsTzzbHistoryData: () =>
+    request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[] }>('/api/holdings/tzzb/history-data'),
   holdingsTzzbHistoryStatus: () =>
     request<{ cached: boolean; date?: string; days?: number; fetched_at?: string | null }>('/api/holdings/tzzb/history-status'),
   holdingsTzzbHistoryFetch: () =>
     request<{ ok: boolean; message: string }>('/api/holdings/tzzb/history', { method: 'POST' }),
-  holdingsTzzbHistoryData: () =>
-    request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[] }>('/api/holdings/tzzb/history-data'),
   holdingsTzzbSync: (account?: string) =>
     request<{ ok: boolean; message: string; endpoint?: string; user_name?: string; imported?: number }>(
       `/api/holdings/tzzb/sync${account ? `?account=${encodeURIComponent(account)}` : ''}`, { method: 'POST' },

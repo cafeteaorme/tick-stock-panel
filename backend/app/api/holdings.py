@@ -516,6 +516,60 @@ def tzzb_history_data():
         return {"cached": False}
 
 
+@router.get("/export/holdings.csv")
+def export_holdings_csv(request: Request, account: str | None = Query(None)):
+    """持仓明细导出 CSV (UTF-8 BOM, Excel 兼容)。"""
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+
+    acc = _acc(request, account)
+    rows = holdings_service.list_all(acc)
+    enriched = _enrich_rows(rows, _rates(), request.app.state.repo.get_name_map([r["symbol"] for r in rows]))
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["代码", "名称", "市场", "现价", "涨跌幅%", "持仓", "可用", "成本", "市值", "浮动盈亏", "浮动盈亏%", "当日参考盈亏", "持有天数", "占比%"])
+    for r in enriched:
+        w.writerow([
+            r["symbol"], r.get("name") or "", r.get("region") or "",
+            r.get("price") or "", (r.get("change_pct") or 0) * 100,
+            r.get("qty"), r.get("available"), r.get("avg_cost"),
+            r.get("market_value") or "", r.get("float_pnl") or "", (r.get("float_pnl_pct") or 0) * 100,
+            r.get("day_pnl") or "", r.get("hold_days") or "",
+            (r.get("position_rate") or 0) * 100,
+        ])
+    buf.seek(0)
+    return StreamingResponse(
+        iter(["\ufeff", buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=holdings_{acc}.csv"},
+    )
+
+
+@router.get("/export/pnl.csv")
+def export_pnl_csv(request: Request, account: str | None = Query(None)):
+    """日收益记录导出 CSV。"""
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+
+    data = pnl(request, account=account)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["日期", "总资产", "持仓市值", "当日盈亏", "当日盈亏%"])
+    for r in data.get("daily", []):
+        w.writerow([r["date"], r["asset"], r["market_value"], r["pnl"],
+                    (r["pnl_pct"] * 100) if r["pnl_pct"] is not None else ""])
+    buf.seek(0)
+    return StreamingResponse(
+        iter(["\ufeff", buf.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=pnl_daily.csv"},
+    )
+
+
 @router.get("/tzzb/history-status")
 def tzzb_history_status():
     from app.services import tzzb

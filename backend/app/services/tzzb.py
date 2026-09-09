@@ -230,6 +230,12 @@ def start_background_sync() -> bool:
                 cfg = load_config()
                 if not (cfg.get("cookie") or "").strip() and not _cdp_port_alive():
                     continue  # 未配置, 静默跳过
+                # 节假日判断: 账本交易日接口 (失败时兜底继续)
+                ltd = _last_trading_day_info()
+                if ltd is not None and not ltd.get("is_trading_day"):
+                    _synced_marker = marker
+                    logger.info("tzzb sync skip: %s 非交易日", now.date().isoformat())
+                    continue
                 _synced_marker = marker
                 res = sync()
                 logger.info("tzzb scheduled sync %s: %s", marker, res.get("message", "")[:120])
@@ -424,6 +430,40 @@ def _f_pl(v) -> float | None:
         return None
 
 
+def _last_trading_day_info() -> dict | None:
+    """当日是否交易日 + 相邻交易日 (缓存当日结果)。"""
+    today = datetime.now(HK_TZ).date().isoformat()
+    cache_key = f"_ltd_{today}"
+    cfg = load_config()
+    if cfg.get(cache_key):
+        return cfg.get(cache_key)
+    cookie = (cfg.get("cookie") or "").strip()
+    if not cookie:
+        return None
+    try:
+        ex = _api("/caishen_fund/stock_common/v1/last_trading_day", cookie, {})
+        info = {
+            "is_trading_day": int(ex.get("is_trading_day") or 0),
+            "last": ex.get("last_trading_day"),
+            "prev": ex.get("prev_trading_day"),
+            "next": ex.get("next_trading_day"),
+        }
+        cfg[cache_key] = info
+        save_config(**{cache_key: info})
+        return info
+    except Exception as e:  # noqa: BLE001
+        logger.warning("last_trading_day failed: %s", e)
+        return None
+
+
+def is_trading_day_today() -> bool:
+    info = _last_trading_day_info()
+    if info is None:
+        # 接口不可用 → 周一至五视为交易日 (兜底)
+        return datetime.now(HK_TZ).date().weekday() < 5
+    return bool(info.get("is_trading_day"))
+
+
 def fetch_history_cache() -> dict[str, Any]:
     """拉取投资账本历史收益 (逐账户×逐年 month_calendar → profit_loss_list 月度权威值)。"""
     cookie = _cdp_cookie()
@@ -465,15 +505,38 @@ def fetch_history_cache() -> dict[str, Any]:
     yearly: dict[str, float] = {}
     for period, v in monthly_acc.items():
         yearly[period[:4]] = round(yearly.get(period[:4], 0) + v, 2)
+
+    # 真实资产趋势 (含出入金): 逐账户 asset_trend 按日合并
+    trend: dict[str, dict] = {}
+    for fk in fund_keys:
+        try:
+            ex = _api("/caishen_fund/pc/asset/v1/asset_trend", cookie,
+                      {"fund_key": fk, "type": "common"})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("asset_trend %s failed: %s", fk, e)
+            continue
+        for row in ex.get("total_asset") or []:
+            d = str(row.get("date") or "")
+            if len(d) != 8:
+                continue
+            iso = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+            cur = trend.setdefault(iso, {"asset": 0.0, "fundIn": 0.0, "fundOut": 0.0})
+            cur["asset"] += _f_pl(row.get("asset")) or 0
+            cur["fundIn"] += _f_pl(row.get("fundIn")) or 0
+            cur["fundOut"] += _f_pl(row.get("fundOut")) or 0
+    trend_list = [{"date": k, **{kk: round(vv, 2) for kk, vv in v.items()}} for k, v in sorted(trend.items())]
+
     payload = {
         "ok": True,
         "date": datetime.now(HK_TZ).date().isoformat(),
         "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
         "monthly": [{"period": k, "pnl": v} for k, v in sorted(monthly_acc.items())],
         "yearly": [{"period": k, "pnl": v} for k, v in sorted(yearly.items())],
+        "asset_trend": trend_list,
+        "trading_day_info": _last_trading_day_info(),
     }
     _atomic_write_json(_hist_path(), payload)
-    return {"ok": True, "message": f"历史收益缓存成功：{len(monthly_acc)} 个月（{fetched_months} 条记录）"}
+    return {"ok": True, "message": f"历史收益缓存成功：{len(monthly_acc)} 个月（{fetched_months} 条记录），资产趋势 {len(trend_list)} 天"}
 
 
 def sync(account_id: str | None = None) -> dict[str, Any]:
