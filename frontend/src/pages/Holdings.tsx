@@ -1482,6 +1482,7 @@ export function Holdings() {
     onSuccess: () => { refreshAll(); qc.invalidateQueries({ queryKey: ['watchlist-enriched'] }); toast('已删除持仓记录', 'success') },
   })
 
+  const monthNow = new Date().getMonth() + 1
   const yearPnl = pnl.data?.yearly?.[0]?.pnl
   const monthPnl = pnl.data?.monthly?.[pnl.data.monthly.length - 1]?.pnl
   const todayPnl = pnl.data?.daily?.[pnl.data.daily.length - 1]?.pnl
@@ -1678,7 +1679,7 @@ export function Holdings() {
 
         {/* 持仓明细 (可排序 + 点击查看) */}
         <div className="rounded-card border border-border bg-surface overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2 relative">
             <TrendingUp className="h-4 w-4 text-accent" />
             <span className="text-sm font-semibold text-foreground">持仓明细</span>
             <span className="text-[10px] text-muted">点列名排序 · 点行查看个股</span>
@@ -1707,7 +1708,7 @@ export function Holdings() {
             >导出 CSV</button>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full text-[13px]" style={{ minWidth: sortHeaders.length * 92 }}>
               <thead>
                 <tr className="text-muted border-b border-border/60 bg-elevated/30">
                   {sortHeaders.map(h => (
@@ -1871,13 +1872,16 @@ export function Holdings() {
               <span className="tabular-nums font-semibold">{year} 年</span>
               <button onClick={() => setYear(y => y + 1)} className="px-1.5 text-secondary hover:text-foreground -rotate-90"><ChevronDown className="h-4 w-4" /></button>
               {tab === 'day' && <span className={`text-xs tabular-nums font-medium ${pnlColor(todayPnl)}`}>今日 {fmtMoney(todayPnl)}</span>}
-              {tab === 'month' && <span className={`text-xs tabular-nums font-medium ${pnlColor(monthPnl)}`}>本月 {fmtMoney(monthPnl)}</span>}
-              {tab === 'year' && <span className={`text-xs tabular-nums font-medium ${pnlColor(yearPnl)}`}>本年 {fmtMoney(yearPnl)}</span>}
-              {tab === 'year' && (historyData.data?.yearly?.length ?? 0) > 0 && (() => {
-                const y = historyData.data!.yearly?.find(yy => yy.period === String(year))
-                return y ? (
-                  <span className={`text-xs tabular-nums ${pnlColor(y.pnl)}`}>账本 {fmtMoney(y.pnl)}</span>
-                ) : null
+              {tab === 'month' && (() => {
+                const ym = `${year}-${String(monthNow).padStart(2, '0')}`
+                const ledger = historyData.data?.monthly?.find(mm => mm.period === ym)
+                const v = ledger ? ledger.pnl : monthPnl
+                return <span className={`text-xs tabular-nums font-medium ${pnlColor(v)}`}>本月 {fmtMoney(v)}{ledger ? ' 账本' : ''}</span>
+              })()}
+              {tab === 'year' && (() => {
+                const ledger = historyData.data?.yearly?.find(yy => yy.period === String(year))
+                const v = ledger ? ledger.pnl : yearPnl
+                return <span className={`text-xs tabular-nums font-medium ${pnlColor(v)}`}>本年 {fmtMoney(v)}{ledger ? ' 账本' : ''}</span>
               })()}
             </div>
           </div>

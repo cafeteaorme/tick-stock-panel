@@ -1192,6 +1192,12 @@ export function Watchlist() {
           {/* 列表 */}
           {list.isLoading && <div className="text-sm text-muted">加载中…</div>}
           {list.isError && <div className="text-sm text-danger">读取自选失败</div>}
+          {!list.isLoading && enriched.isError && (
+            <div className="flex items-center gap-2 rounded-btn border border-danger/30 bg-danger/5 px-3 py-2 my-2">
+              <span className="text-xs text-danger flex-1">行情数据加载失败</span>
+              <button onClick={() => enriched.refetch()} className="px-2.5 py-1 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground">重试</button>
+            </div>
+          )}
 
           {allSymbols.length === 0 ? (
             <EmptyState

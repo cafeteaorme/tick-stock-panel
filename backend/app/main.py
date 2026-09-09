@@ -152,6 +152,7 @@ async def lifespan(app: FastAPI):
         from app.services import tzzb
         tzzb.start_background_sync()
         tzzb.start_hk_price_refresh()
+        tzzb.start_hk_price_refresh()
     except Exception as e:  # noqa: BLE001
         logger.warning("tzzb sync start failed: %s", e)
 
