@@ -295,11 +295,14 @@ def accounts(request: Request):
         market_value = sum(r["market_value"] or 0 for r in enriched)
         port = holdings_service.get_portfolio(acc_id)
         base = market_value - day_pnl if (market_value - day_pnl) else None
+        tzzb_count = sum(1 for r in rows
+                         if r.get("status") != "closed" and r.get("source") == "tzzb")
         out.append({
             **a,
             "positions": len(enriched),
             "day_pnl": round(day_pnl, 2),
             "day_pnl_pct": round(day_pnl / base, 6) if base else None,
+            "tzzb_count": tzzb_count,
             "active": acc_id == obj.get("active"),
         })
     return {"accounts": out, "active": obj.get("active")}
@@ -344,7 +347,9 @@ def list_holdings(request: Request, include_closed: bool = Query(False), account
     symbols = [r["symbol"] for r in open_rows]
     enriched = _enrich_rows(open_rows, rates, repo.get_name_map(symbols), _market_rows(request, symbols, rates))
     if include_closed:
-        enriched = enriched + [r for r in rows if r.get("status") == "closed"]
+        closed_raw = [r for r in rows if r.get("status") == "closed"]
+        nm = request.app.state.repo.get_name_map([r["symbol"] for r in closed_raw])
+        enriched = enriched + [{**r, "name": nm.get(r["symbol"])} for r in closed_raw]
     return {"rows": enriched, "account": acc}
 
 

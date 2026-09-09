@@ -246,12 +246,11 @@ def upsert(account_id: str, symbol: str, qty: float,
            extras: dict | None = None, source: str = "tzzb") -> list[dict]:
     df = _read(account_id)
     # 手动来源 (manual/screenshot) 的行不被 tzzb 同步覆盖或删除
-    if source == "tzzb":
-        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")
-                         & (pl.col("source") == "manual")))
+    if source == "manual":
+        # 手动添加: 不覆盖已有行 (由调用方决定)
+        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
     else:
-        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")
-                         & (pl.col("source") == source)))
+        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
     row = {
         "symbol": symbol,
         "qty": float(qty),
@@ -324,7 +323,7 @@ def remove(account_id: str, symbol: str) -> list[dict]:
 
 
 def remove_stale_tzzb(account_id: str, valid_symbols: set[str]) -> list[str]:
-    """同步清理: 仅删除 tzzb 来源且不在最新账本持仓中的 open 行 (保护手动/截图来源)。"""
+    """同步清理: 删除不在最新账本持仓中的 tzzb 来源 open 行 (保护手动/截图来源)。"""
     df = _read(account_id)
     stale = df.filter(
         (pl.col("status") != "closed")

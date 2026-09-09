@@ -1537,7 +1537,7 @@ export const api = {
     ),
   // ---- 多账户 ----
   holdingsAccounts: () =>
-    request<{ accounts: (AccountInfo & { day_pnl?: number; day_pnl_pct?: number | null; positions?: number })[]; active: string }>('/api/holdings/accounts'),
+    request<{ accounts: (AccountInfo & { day_pnl?: number; day_pnl_pct?: number | null; positions?: number; tzzb_count?: number })[]; active: string }>('/api/holdings/accounts'),
   holdingsTzzbStatus: () =>
     request<{ cookie_set: boolean; endpoint?: string; user_name?: string; last_sync?: string | null; last_result?: string; last_ok?: boolean }>('/api/holdings/tzzb/status'),
   holdingsTzzbSetCookie: (cookie: string) =>

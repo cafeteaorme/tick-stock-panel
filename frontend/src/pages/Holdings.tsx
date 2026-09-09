@@ -233,8 +233,8 @@ function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: string; 
           >
             {c.date && <span className={`text-[10px] tabular-nums ${c.pnl != null ? 'opacity-80' : ''}`}>{Number(c.date.slice(8))}</span>}
             {c.pnl != null && Math.abs(c.pnl) >= 1 && (
-              <span className={`text-xs font-bold tabular-nums leading-tight ${c.pnl > 0 ? 'text-white' : 'text-white'}`}>
-                {c.pnl > 0 ? '+' : ''}{Math.abs(c.pnl) >= 1_0000 ? `${(c.pnl / 1_0000).toFixed(1)}万` : Math.abs(c.pnl) >= 1000 ? `${Math.round(c.pnl / 1000)}k` : Math.round(c.pnl)}
+              <span className={`font-bold tabular-nums leading-tight max-w-full truncate ${c.pnl > 0 ? 'text-white' : 'text-white'} ${Math.abs(c.pnl) >= 100000 ? 'text-[10px]' : 'text-xs'}`}>
+                {c.pnl > 0 ? '+' : ''}{fmtMoney(c.pnl, 0)}
               </span>
             )}
           </button>
@@ -1539,6 +1539,8 @@ export function Holdings() {
   })
 
   const monthNow = new Date().getMonth() + 1
+  const activeAccName = accounts.find(a => a.id === activeAcc)?.name ?? ''
+  const useLedgerMonthly = !!(historyData.data?.cached && historyData.data.monthly?.length)
   const yearPnl = pnl.data?.yearly?.[0]?.pnl
   const todayPnl = pnl.data?.daily?.[pnl.data.daily.length - 1]?.pnl
 
@@ -1653,8 +1655,9 @@ export function Holdings() {
                   refreshAll()
                 }}
                 className={`px-2.5 py-1 rounded-[6px] text-xs transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
-                title={`${a.name} · ${a.positions ?? 0} 只持仓`}>
+                title={`${a.name} · ${a.positions ?? 0} 只持仓${(a.tzzb_count ?? 0) > 0 ? ` · 账本同步 ${a.tzzb_count} 只` : ''}`}>
                 {a.name}
+                {(a.tzzb_count ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 ml-0.5 align-middle" />}
                 {(a.day_pnl != null) && (
                   <span className={`ml-1 tabular-nums ${pnlColor(a.day_pnl)}`}>
                     {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[9px]"> {fmtPct(a.day_pnl_pct)}</span>}
@@ -1969,9 +1972,12 @@ export function Holdings() {
         <div className="rounded-card border border-border bg-surface p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-foreground">月收益</span>
-            {(historyData.data?.monthly?.find(mm => mm.period === `${year}-${String(monthNow).padStart(2, '0')}`)) && (
-              <span className="text-xs text-secondary">含本月</span>
-            )}
+            <div className="flex items-center gap-2">
+              {useLedgerMonthly && historyData.data?.monthly?.find(mm => mm.period === `${year}-${String(monthNow).padStart(2, '0')}`) && (
+                <span className="text-xs text-secondary">含本月</span>
+              )}
+              <span className="text-[11px] text-muted">{useLedgerMonthly ? '账本 · 全部账户' : `本账户${activeAccName ? ` · ${activeAccName}` : ''}`}</span>
+            </div>
           </div>
           <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
         </div>
@@ -1995,7 +2001,7 @@ export function Holdings() {
                 const ledger = historyData.data?.yearly?.find(yy => yy.period === String(year))
                 const v = ledger ? ledger.pnl : yearPnl
                 return v != null ? (
-                  <span className={`text-sm tabular-nums font-medium ${pnlColor(v)}`}>{fmtMoney(v)}{ledger ? '（账本）' : ''}</span>
+                  <span className={`text-sm tabular-nums font-medium ${pnlColor(v)}`}>{fmtMoney(v)}{ledger ? '（账本 · 全部账户）' : (activeAccName ? `（本账户 · ${activeAccName}）` : '')}</span>
                 ) : null
               })()}
             </div>
