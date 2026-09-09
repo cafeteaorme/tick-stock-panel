@@ -210,14 +210,11 @@ function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: string; 
 
   return (
     <div className={fillHeight ? 'flex flex-col h-full min-h-0' : ''}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1.5">
-          {/* 年份由外层切换器统一控制, 此处只显示月份, 避免重复 */}
-          <button onClick={() => shiftMonth(-1)} className="p-1 rounded-btn text-secondary hover:bg-elevated hover:text-foreground" title="上一月"><ChevronLeft className="h-4 w-4" /></button>
-          <span className="text-base font-bold text-foreground tabular-nums px-1">{Number(month.split('-')[1])} 月</span>
-          <button onClick={() => shiftMonth(1)} className="p-1 rounded-btn text-secondary hover:bg-elevated hover:text-foreground" title="下一月"><ChevronRight className="h-4 w-4" /></button>
-        </div>
-        <span className={`text-sm tabular-nums font-semibold ${pnlColor(monthPnl)}`}>{fmtMoney(monthPnl)}</span>
+      <div className="flex items-center justify-center gap-2 mb-3">
+        <button onClick={() => shiftMonth(-1)} className="p-1 rounded-btn text-secondary hover:bg-elevated hover:text-foreground" title="上一月"><ChevronLeft className="h-4 w-4" /></button>
+        <span className="text-base font-bold text-foreground tabular-nums">{Number(month.split('-')[1])} 月</span>
+        <button onClick={() => shiftMonth(1)} className="p-1 rounded-btn text-secondary hover:bg-elevated hover:text-foreground" title="下一月"><ChevronRight className="h-4 w-4" /></button>
+        <span className={`ml-2 text-sm tabular-nums font-semibold ${pnlColor(monthPnl)}`}>{fmtMoney(monthPnl)}</span>
       </div>
       <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-muted mb-1">
         {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}
@@ -1871,15 +1868,18 @@ export function Holdings() {
             <div className="flex-1 min-w-0 flex flex-col">
               {/* 日收益: 右列, 与左列等高 */}
               <div className="rounded-card border border-border bg-surface p-4 flex flex-col flex-1 min-h-0">
-                <div className="flex items-center justify-between mb-2 shrink-0">
-                  <span className="text-sm font-semibold text-foreground">日收益</span>
-                  <div className="flex items-center gap-2 text-sm">
-                    <button onClick={() => setYear(y => y - 1)} className="px-1.5 text-secondary hover:text-foreground rotate-90"><ChevronDown className="h-4 w-4" /></button>
-                    <span className="tabular-nums font-semibold">{year} 年</span>
-                    <button onClick={() => setYear(y => y + 1)} className="px-1.5 text-secondary hover:text-foreground -rotate-90"><ChevronDown className="h-4 w-4" /></button>
-                    <span className={`text-xs tabular-nums font-medium ${pnlColor(todayPnl)}`}>今日 {fmtMoney(todayPnl)}</span>
+                <div className="shrink-0 mb-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-foreground">日收益</span>
+                    <button onClick={() => window.open(`/api/holdings/export/pnl.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')} className="text-[11px] text-accent hover:underline">导出</button>
                   </div>
-                  <button onClick={() => window.open(`/api/holdings/export/pnl.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')} className="text-[11px] text-accent hover:underline">导出</button>
+                  {/* 年份切换: 居中; 右侧显示今日盈亏 */}
+                  <div className="flex items-center justify-center gap-2 mt-1.5">
+                    <button onClick={() => setYear(y => y - 1)} className="px-1.5 text-secondary hover:text-foreground rotate-90"><ChevronDown className="h-4 w-4" /></button>
+                    <span className="text-sm font-semibold tabular-nums text-secondary">{year} 年</span>
+                    <button onClick={() => setYear(y => y + 1)} className="px-1.5 text-secondary hover:text-foreground -rotate-90"><ChevronDown className="h-4 w-4" /></button>
+                    <span className={`ml-3 text-sm tabular-nums font-semibold ${pnlColor(todayPnl)}`}>今日 {fmtMoney(todayPnl)}</span>
+                  </div>
                 </div>
                 <div className="flex-1 min-h-0">
                   {pnl.isLoading ? <LoadingSkeleton height={300} />
