@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, RefreshCw, Clock } from 'lucide-react'
@@ -51,6 +51,12 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
     queryFn: api.watchlistList,
     enabled: !!symbol,
   })
+  // 我的持仓 (徽章展示 + 卖出后自动消失)
+  const holdings = useQuery({
+    queryKey: QK.holdings,
+    queryFn: () => api.holdingsList(),
+    enabled: !!symbol,
+  })
   const inWatchlist = (watchlist.data?.symbols ?? []).some((s: any) => s.symbol === symbol)
 
   const toggleWatchlist = useMutation({
@@ -92,6 +98,11 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
   // 港美股分时入口需「港美股分时图」设置开关; A股不受限
   const isHkUs = !!(symbol?.endsWith('.HK') || symbol?.endsWith('.US'))
   const hkUsIntradayAllowed = !isHkUs || !!prefs?.hk_us_intraday_enabled
+  // 我的持仓标记 (自选 enriched 行 JOIN holdings)
+  const holding = useMemo(() => {
+    if (!symbol) return null
+    return holdings.data?.rows?.find((r: any) => r.symbol === symbol && r.qty > 0) ?? null
+  }, [holdings.data, symbol])
 
   const handleRefresh = () => {
     if (!symbol) return
@@ -136,6 +147,14 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo }: Props
                 })()}
                 <span className="font-mono text-sm font-medium text-foreground">{symbol}</span>
                 {name && <span className="text-xs text-muted">{name}</span>}
+                {holding && (
+                  <span
+                    title={`我的持仓 ${holding.qty} 股${holding.avg_cost ? ` · 成本 ${holding.avg_cost}` : ''} · 前往「持仓」页可编辑/卖出`}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
+                  >
+                    持{holding.qty >= 10000 ? `${(holding.qty / 10000).toFixed(1)}万` : Math.round(holding.qty)}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5">

@@ -40,6 +40,7 @@ class ImportCandidate:
     matched: bool
     market: str = "CN"          # CN / HK / US
     qty: float | None = None    # 持仓数量 (股)
+    available: float | None = None  # 可用数量 (股)
     cost: float | None = None   # 成本价
     already_in_watchlist: bool = False
 
@@ -239,6 +240,7 @@ def _parse_ai_line(
     symbol = None
     code = ""
     qty = None
+    available = None
     cost = None
 
     for tok in tokens:
@@ -250,7 +252,7 @@ def _parse_ai_line(
             if hit:
                 symbol, code = hit, tok
                 continue
-        # 数值 token: 小数 → 成本; 整数 → 数量
+        # 数值 token: 小数 → 成本; 第一个整数 → 持仓数量; 第二个整数 → 可用数量
         try:
             if "." in tok or "," in tok:
                 v = float(tok.replace(",", ""))
@@ -258,8 +260,12 @@ def _parse_ai_line(
                     cost = v
             else:
                 v = float(tok)
-                if qty is None and 1 <= v <= 100_000_000:
+                if not 1 <= v <= 100_000_000:
+                    continue
+                if qty is None:
                     qty = v
+                elif available is None:
+                    available = v
         except ValueError:
             pass
 
@@ -285,7 +291,7 @@ def _parse_ai_line(
     if symbol is None or symbol in seen:
         return []
     seen.add(symbol)
-    return [(code or symbol, market, symbol, qty, cost)]
+    return [(code or symbol, market, symbol, qty, cost, available)]
 
 
 def _parse_lines(
@@ -321,12 +327,13 @@ def _parse_lines(
         # AI 通道结构化行 (「CN - 长鑫科技 1000 55.135」): 走专用解析, 信任市场前缀
         ai_m = _AI_LINE_RE.match(line)
         if ai_m:
-            for code, market, symbol, qty, cost in _parse_ai_line(
+            for code, market, symbol, qty, cost, available in _parse_ai_line(
                 ai_m.group(1), ai_m.group(2),
                 cn_code_to_symbol, hk_code_to_symbol, us_code_to_symbol,
                 name_to_symbol or {}, seen,
             ):
-                results.append((code, market, symbol, qty, cost, []))
+                results.append((code, market, symbol, qty, cost, [], available))
+                # noqa 注意: available 由 _parse_ai_line 返回值第 6 位携带
             continue
 
         if any(w in line for w in _HEADER_WORDS) and not _CODE_RE.search(line):

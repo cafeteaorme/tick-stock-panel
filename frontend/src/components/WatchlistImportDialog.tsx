@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ImagePlus, Loader2, Upload, X } from 'lucide-react'
+import { ImagePlus, Loader2, Upload, X, Briefcase } from 'lucide-react'
 import { Modal } from '@/components/Modal'
 import { toast } from '@/components/Toast'
 import { api, type WatchlistImportCandidate } from '@/lib/api'
@@ -239,7 +239,24 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
     else setSelected(new Set(selectable.map(c => c.symbol!)))
   }
 
-  const confirmAdd = async () => {
+  const confirmAdd = async (mode: 'watchlist' | 'holdings' = 'watchlist') => {
+    if (mode === 'holdings') {
+      const items = candidates
+        .filter(c => selected.has(c.symbol!) && c.qty && c.qty > 0)
+        .map(c => ({ symbol: c.symbol!, qty: c.qty!, cost: c.cost ?? undefined }))
+      if (items.length === 0) {
+        toast('所选候选缺少持仓数量，无法导入持仓', 'error')
+        return
+      }
+      try {
+        await api.holdingsImport(items)
+        toast(`已导入 ${items.length} 只持仓（含数量/成本，已自动加自选）`, 'success')
+        onClose()
+      } catch {
+        /* toast in request */
+      }
+      return
+    }
     const symbols = [...selected]
     if (symbols.length === 0) {
       toast('请至少选择一只股票', 'error')
@@ -431,8 +448,18 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
         </button>
         <button
           type="button"
+          disabled={ocrBlocked || selected.size === 0 || busy}
+          onClick={() => void confirmAdd('holdings')}
+          className="h-8 px-3 rounded-btn text-xs inline-flex items-center gap-1.5 border border-violet-500/40 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 disabled:opacity-40"
+          title="连同识别出的数量/成本写入我的持仓"
+        >
+          <Briefcase className="h-3.5 w-3.5" />
+          导入到持仓 ({selected.size})
+        </button>
+        <button
+          type="button"
           disabled={ocrBlocked || selected.size === 0 || batchAdd.isPending || busy}
-          onClick={() => void confirmAdd()}
+          onClick={() => void confirmAdd('watchlist')}
           className="h-8 px-3 rounded-btn text-xs inline-flex items-center gap-1.5 bg-accent text-white hover:bg-accent/90 disabled:opacity-40"
         >
           {batchAdd.isPending ? (
@@ -440,7 +467,7 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
           ) : (
             <Upload className="h-3.5 w-3.5" />
           )}
-          添加所选 ({selected.size})
+          添加自选 ({selected.size})
         </button>
       </div>
     </Modal>

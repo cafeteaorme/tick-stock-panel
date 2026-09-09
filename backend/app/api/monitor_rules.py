@@ -132,6 +132,7 @@ def get_options(request: Request):
         ],
         "scopes": [
             {"key": "symbols", "label": "指定标的"},
+            {"key": "holdings", "label": "我的持仓"},
             {"key": "all", "label": "全市场"},
             {"key": "sector", "label": "板块"},
         ],

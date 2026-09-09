@@ -23,6 +23,9 @@ export const QK = {
 
   // Watchlist
   watchlist:            ['watchlist'] as const,
+  holdings:             ['holdings'] as const,
+  holdingsSummary:      ['holdings-summary'] as const,
+  holdingsPnl:          (start?: string) => ['holdings-pnl', start ?? 'default'] as const,
   watchlistQuotes:      ['watchlist-quotes'] as const,
   watchlistEnriched:    (ext?: string) => ['watchlist-enriched', ext] as const,
   watchlistKlineBatch:  (symbols: string) => ['watchlist-kline-batch', symbols] as const,

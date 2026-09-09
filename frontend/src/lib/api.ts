@@ -257,6 +257,51 @@ export interface WatchlistImportResult {
   unmatched_count: number
 }
 
+/** 我的持仓行 (含实时行情与盈亏) */
+export interface HoldingRow {
+  symbol: string
+  name?: string | null
+  region?: string
+  qty: number
+  available: number | null
+  avg_cost: number | null
+  status: string
+  opened_at?: string | null
+  closed_at?: string | null
+  realized_pnl?: number | null
+  price?: number | null
+  change_pct?: number | null
+  market_value?: number | null
+  float_pnl?: number | null
+  float_pnl_pct?: number | null
+  day_pnl?: number | null
+}
+
+export interface HoldingsSummary {
+  initial_cap: number
+  cash: number
+  total_market_value: number
+  total_asset: number
+  position_pct: number | null
+  float_pnl: number
+  realized_pnl: number
+  total_pnl: number
+  total_pnl_pct: number | null
+  day_pnl: number
+  day_pnl_pct: number | null
+  positions: number
+  contributions: { symbol: string; name?: string | null; float_pnl?: number | null; market_value?: number | null }[]
+  updated_at?: string | null
+}
+
+export interface HoldingsPnl {
+  daily: { date: string; market_value: number; asset: number; pnl: number; pnl_pct: number | null }[]
+  monthly: { period: string; pnl: number; days: number }[]
+  yearly: { period: string; pnl: number; days: number }[]
+  cash?: number
+  initial_cap?: number
+}
+
 export interface Quote {
   symbol: string
   price?: number
@@ -1404,6 +1449,43 @@ export const api = {
     }),
   watchlistOcrStatus: () =>
     request<{ provider: string; available: boolean }>('/api/watchlist/ocr-status'),
+
+  // ---------------- 我的持仓 ----------------
+  holdingsList: (includeClosed = false) =>
+    request<{ rows: HoldingRow[] }>(
+      includeClosed ? '/api/holdings?include_closed=true' : '/api/holdings',
+    ),
+  holdingsSummary: () => request<HoldingsSummary>('/api/holdings/summary'),
+  holdingsUpsert: (symbol: string, body: { qty: number; available?: number; avg_cost?: number }) =>
+    request<{ rows: HoldingRow[] }>(`/api/holdings/${encodeURIComponent(symbol)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  holdingsSell: (symbol: string, price: number, qty?: number) =>
+    request<{ symbol: string; realized_pnl: number }>(
+      `/api/holdings/${encodeURIComponent(symbol)}/sell`,
+      { method: 'POST', body: JSON.stringify({ price, qty }) },
+    ),
+  holdingsRemove: (symbol: string) =>
+    request<{ rows: HoldingRow[] }>(`/api/holdings/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
+  holdingsPortfolio: (body: { initial_cap?: number; cash?: number }) =>
+    request<{ initial_cap: number; cash: number; updated_at: string | null }>(
+      '/api/holdings/portfolio',
+      { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  holdingsImport: (items: { symbol: string; qty: number; available?: number; cost?: number }[]) =>
+    request<{ imported: number }>('/api/holdings/import', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  holdingsPnl: (start?: string, end?: string) =>
+    request<HoldingsPnl>(
+      `/api/holdings/pnl${start ? `?start=${start}` : ''}${end ? `${start ? '&' : '?'}end=${end}` : ''}`,
+    ),
+  holdingsBenchmark: (start?: string, symbol = '000001.SH') =>
+    request<{ symbol: string; name?: string; dates: string[]; closes: number[] }>(
+      `/api/holdings/benchmark?symbol=${encodeURIComponent(symbol)}${start ? `&start=${start}` : ''}`,
+    ),
   watchlistImportImage: (file: File, signal?: AbortSignal, quiet = false) => {
     const fd = new FormData()
     fd.append('file', file)

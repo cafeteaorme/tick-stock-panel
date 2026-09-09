@@ -25,6 +25,7 @@ const LimitUpLadder = lazy(() => import('./pages/LimitUpLadder').then(m => ({ de
 const Branding = lazy(() => import('./pages/Branding').then(m => ({ default: m.Branding })))
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })))
 const Indices = lazy(() => import('./pages/Indices').then(m => ({ default: m.Indices })))
+const Holdings = lazy(() => import('./pages/Holdings').then(m => ({ default: m.Holdings })))
 const Dev = lazy(() => import('./pages/Dev').then(m => ({ default: m.Dev })))
 
 // 首次使用守卫 —— 未完成向导则重定向到 /onboarding
@@ -75,6 +76,7 @@ export const router = createBrowserRouter([
       { path: 'stock-analysis', element: <StockAnalysis /> },
       { path: 'review', element: <Review /> },
       { path: 'watchlist', element: <Watchlist /> },
+      { path: 'holdings', element: <Holdings /> },
       { path: 'screener', element: <Screener /> },
       { path: 'backtest', element: <Backtest /> },
       { path: 'financials', element: <Financials /> },

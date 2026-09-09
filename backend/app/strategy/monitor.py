@@ -740,6 +740,13 @@ class MonitorRuleEngine:
         scope = rule.get("scope", "symbols")
         if scope == "all":
             return df
+        if scope == "holdings":
+            # 我的持仓: 过滤当前 open 持仓 symbol (无持仓时空)
+            from app.services import holdings as holdings_svc
+            syms = [r["symbol"] for r in holdings_svc.list_all()]
+            if not syms:
+                return df.head(0)
+            return df.filter(pl.col("symbol").is_in(syms))
         if scope == "symbols":
             syms = rule.get("symbols", [])
             if not syms:

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # ── 常量 ────────────────────────────────────────────────
 ID_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 RULE_TYPES = {"strategy", "signal", "price", "market", "ladder"}
-SCOPES = {"symbols", "all", "sector"}
+SCOPES = {"symbols", "all", "sector", "holdings"}
 LOGICS = {"and", "or"}
 DIRECTIONS = {"entry", "exit", "both"}
 STRATEGY_NOTIFY_EVENTS = {"buy_signal", "sell_signal", "pool_entry", "pool_exit"}

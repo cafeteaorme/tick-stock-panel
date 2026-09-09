@@ -308,10 +308,25 @@ def watchlist_enriched(
             pl.col("symbol").map_elements(get_region, return_dtype=pl.Utf8).alias("region")
         )
 
+    # 持仓标记: JOIN 我的持仓 (open 状态), 自选行带 holding_qty/holding_cost
+    try:
+        from app.services import holdings as holdings_svc
+
+        h_rows = holdings_svc.list_all()
+        if h_rows:
+            h_df = pl.DataFrame({
+                "symbol": [r["symbol"] for r in h_rows],
+                "holding_qty": [float(r.get("qty") or 0) for r in h_rows],
+                "holding_cost": [r.get("avg_cost") for r in h_rows],
+            })
+            df = df.join(h_df, on="symbol", how="left")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("holdings join to watchlist failed: %s", e)
+
     # 选择内置需要的列
     keep = [
         c
-        for c in _WATCHLIST_COLS + ["name", "float_shares", "asset_type", "region"]
+        for c in _WATCHLIST_COLS + ["name", "float_shares", "asset_type", "region", "holding_qty", "holding_cost"]
         if c in df.columns
     ]
     df = df.select(keep)

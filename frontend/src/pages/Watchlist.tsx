@@ -486,6 +486,14 @@ const StockCard = React.memo(function StockCard({
               {board.label}
             </span>
           )}
+          {r.holding_qty != null && r.holding_qty > 0 && (
+            <span
+              title={`我的持仓 ${r.holding_qty} 股${r.holding_cost ? ` · 成本 ${r.holding_cost}` : ''}`}
+              className="shrink-0 inline-flex items-center gap-0.5 px-1 h-[16px] rounded border border-violet-500/30 bg-violet-500/12 text-violet-400 text-[9px] font-bold leading-none"
+            >
+              持{r.holding_qty >= 10000 ? `${(r.holding_qty / 10000).toFixed(1)}万` : Math.round(r.holding_qty)}
+            </span>
+          )}
           {r.consecutive_limit_ups > 0 && (
             <span className="shrink-0 inline-flex items-center justify-center px-1 h-[16px] rounded bg-danger/15 text-danger text-[9px] font-bold tabular-nums">
               {r.consecutive_limit_ups === 1 ? '首板' : `${r.consecutive_limit_ups}连`}
@@ -1301,6 +1309,14 @@ export function Watchlist() {
                           )}
                           {region === 'US' && (
                             <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border border-sky-500/25 bg-sky-500/12 text-sky-400">US</span>
+                          )}
+                          {r.holding_qty != null && r.holding_qty > 0 && (
+                            <span
+                              title={`我的持仓 ${r.holding_qty} 股${r.holding_cost ? ` · 成本 ${r.holding_cost}` : ''}`}
+                              className="shrink-0 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
+                            >
+                              持{r.holding_qty >= 10000 ? `${(r.holding_qty / 10000).toFixed(1)}万` : Math.round(r.holding_qty)}
+                            </span>
                           )}
                           {monitoredSymbols.has(r.symbol) && <span className="ml-2"><RealtimeDot /></span>}
                         </button>
