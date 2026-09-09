@@ -174,7 +174,7 @@ function SummaryCard({ s, onSetCap }: {
  * 收益日历热力图 (可点击某日看明细)
  * ================================================================ */
 
-function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number }[]; onPickDay: (d: string) => void }) {
+function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: string; pnl: number }[]; onPickDay: (d: string) => void; fillHeight?: boolean }) {
   const [month, setMonth] = useState(() => {
     const last = daily[daily.length - 1]
     return last ? last.date.slice(0, 7) : new Date().toISOString().slice(0, 7)
@@ -209,7 +209,7 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
   }
 
   return (
-    <div>
+    <div className={fillHeight ? 'flex flex-col h-full min-h-0' : ''}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 text-accent" />
@@ -224,7 +224,7 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
       <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-muted mb-1">
         {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}
       </div>
-      <div className="grid grid-cols-7 gap-1">
+      <div className={`grid grid-cols-7 gap-1 ${fillHeight ? 'flex-1 min-h-0 grid-rows-6' : ''}`}>
         {cells.map((c, i) => (
           <button
             key={i}
@@ -232,7 +232,7 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
             onClick={() => c.date && c.pnl != null && onPickDay(c.date)}
             title={c.date && c.pnl != null ? `${c.date} · ${fmtMoney(c.pnl)}（点击查看明细）` : ''}
             style={{ background: c.date && c.pnl != null ? bg(c.pnl) : undefined }}
-            className={`aspect-square rounded-md flex flex-col items-center justify-center transition-transform
+            className={`${fillHeight ? 'h-full min-h-[24px]' : 'aspect-square'} rounded-md flex flex-col items-center justify-center transition-transform
               ${c.date ? 'bg-elevated/40' : 'opacity-0'}
               ${c.pnl != null ? 'text-white hover:scale-105 cursor-pointer' : 'text-muted cursor-default'}`}
           >
@@ -245,7 +245,7 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
           </button>
         ))}
       </div>
-      <div className="flex items-center justify-between mt-2 text-[10px] text-muted">
+      <div className="flex items-center justify-between mt-2 text-[10px] text-muted shrink-0">
         <span>亏损</span>
         <div className="flex gap-0.5">
           {[0.5, 0.35, 0.2].map(t => <span key={t} className="w-4 h-2 rounded-sm" style={{ background: `rgba(34,197,94,${t})` }} />)}
@@ -1845,7 +1845,7 @@ export function Holdings() {
 
         {/* 左: 持仓结构 + 个股盈亏贡献 (上下) | 右: 日收益日历 对齐 */}
         {rows.length > 0 && (
-          <div className="flex gap-4 items-start">
+          <div className="flex gap-4 items-stretch">
             <div className="w-[46%] shrink-0 space-y-4">
               <div className="rounded-card border border-border bg-surface p-4">
                 <div className="flex items-center gap-2 mb-2"><PieIcon className="h-4 w-4 text-accent" /><span className="text-sm font-semibold text-foreground">持仓结构</span></div>
@@ -1870,10 +1870,10 @@ export function Holdings() {
                 </div>
               </div>
             </div>
-            <div className="flex-1 min-w-0 space-y-4">
-              {/* 日收益: 右列顶部 */}
-              <div className="rounded-card border border-border bg-surface p-4">
-                <div className="flex items-center justify-between mb-2">
+            <div className="flex-1 min-w-0 flex flex-col">
+              {/* 日收益: 右列, 与左列等高 */}
+              <div className="rounded-card border border-border bg-surface p-4 flex flex-col flex-1 min-h-0">
+                <div className="flex items-center justify-between mb-2 shrink-0">
                   <span className="text-sm font-semibold text-foreground">日收益</span>
                   <div className="flex items-center gap-2 text-sm">
                     <button onClick={() => setYear(y => y - 1)} className="px-1.5 text-secondary hover:text-foreground rotate-90"><ChevronDown className="h-4 w-4" /></button>
@@ -1883,24 +1883,27 @@ export function Holdings() {
                   </div>
                   <button onClick={() => window.open(`/api/holdings/export/pnl.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')} className="text-[11px] text-accent hover:underline">导出</button>
                 </div>
-                {pnl.isLoading ? <LoadingSkeleton height={260} />
-                  : <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} />}
-              </div>
-              {/* 月收益: 下方 */}
-              <div className="rounded-card border border-border bg-surface p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-foreground">月收益</span>
-                  {(historyData.data?.monthly?.find(mm => mm.period === `${year}-${String(monthNow).padStart(2, '0')}`)) && (
-                    <span className="text-xs text-secondary">含本月</span>
-                  )}
+                <div className="flex-1 min-h-0">
+                  {pnl.isLoading ? <LoadingSkeleton height={300} />
+                    : <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} fillHeight />}
                 </div>
-                <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
               </div>
             </div>
           </div>
         )}
 
-        {/* 年收益: 独立下方 */}
+        {/* 月收益: 全宽, 与年收益同宽 */}
+        <div className="rounded-card border border-border bg-surface p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-foreground">月收益</span>
+            {(historyData.data?.monthly?.find(mm => mm.period === `${year}-${String(monthNow).padStart(2, '0')}`)) && (
+              <span className="text-xs text-secondary">含本月</span>
+            )}
+          </div>
+          <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
+        </div>
+
+        {/* 年收益: 全宽 */}
         <div className="rounded-card border border-border bg-surface p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-foreground">年收益</span>
