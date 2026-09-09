@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Briefcase, CalendarDays, Camera, ChevronDown, Loader2, Pencil, PieChart as PieIcon,
-  Plus, RefreshCw, Sparkles, TrendingUp, Trash2, Wallet, X,
+  Plus, RefreshCw, Settings as SettingsIcon, Sparkles, TrendingUp, Trash2, Wallet, X,
 } from 'lucide-react'
 import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
@@ -34,6 +34,11 @@ function fmtMoney(v: number | null | undefined, digits = 2): string {
   if (abs >= 1_0000_0000) return `${sign}${(abs / 1_0000_0000).toFixed(2)}亿`
   if (abs >= 1_0000) return `${sign}${(abs / 1_0000).toFixed(2)}万`
   return `${sign}${abs.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
+
+function fmtPnlPct(v: number | null | undefined, digits = 2): string {
+  if (v == null || !Number.isFinite(v)) return '—'
+  return `${v > 0 ? '+' : ''}${(v * 100).toFixed(digits)}%`
 }
 
 function fmtPct(v: number | null | undefined, digits = 2): string {
@@ -81,8 +86,19 @@ function SummaryCard({ s, spark, onEditPortfolio }: { s: HoldingsSummary; spark:
     <div className="rounded-card border border-border bg-surface p-5 md:p-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-xs text-muted">总资产{ s.initial_cap ? <span className="ml-1">（本金 {fmtMoney(s.initial_cap, 0)}）</span> : null }</div>
+          <div className="text-xs text-muted">总资产{ s.initial_cap ? <span className="ml-1">（本金 {fmtMoney(s.initial_cap, 0)}{s.withdrawals ? ` · 出金 ${fmtMoney(s.withdrawals, 0)}` : ''}）</span> : null }</div>
           <div className="text-3xl md:text-4xl font-bold text-foreground tabular-nums mt-1.5 tracking-tight">{fmtMoney(s.total_asset)}</div>
+        </div>
+        <div className="md:ml-10">
+          <div className="text-xs text-muted">累计盈亏<span className="ml-1">（本金-出金-总资产）</span></div>
+          <div className={`text-2xl md:text-3xl font-bold tabular-nums mt-1.5 tracking-tight ${pnlColor(s.cum_pnl)}`}>
+            {fmtMoney(s.cum_pnl)}
+          </div>
+          {s.cum_pnl != null && s.initial_cap - s.withdrawals > 0 && (
+            <div className="text-xs tabular-nums text-muted mt-0.5">
+              累计收益率 {fmtPnlPct(s.cum_pnl / (s.initial_cap - s.withdrawals))}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {spark.length >= 2 && (
@@ -419,12 +435,17 @@ function EditDialog({ row, onClose }: { row: HoldingRow; onClose: () => void }) 
   )
 }
 
-function PortfolioDialog({ initial, cash, onClose }: { initial: number; cash: number; onClose: () => void }) {
+function PortfolioDialog({ initial, cash, withdrawals, onClose }: { initial: number; cash: number; withdrawals: number; onClose: () => void }) {
   const qc = useQueryClient()
   const [cap, setCap] = useState(initial ? String(initial) : '')
   const [c, setC] = useState(String(cash))
+  const [w, setW] = useState(withdrawals ? String(withdrawals) : '')
   const save = useMutation({
-    mutationFn: () => api.holdingsPortfolio({ initial_cap: cap ? Number(cap) : undefined, cash: Number(c) || 0 }),
+    mutationFn: () => api.holdingsPortfolio({
+      initial_cap: cap ? Number(cap) : undefined,
+      cash: Number(c) || 0,
+      withdrawals: w ? Number(w) : 0,
+    }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK.holdingsSummary })
       qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
@@ -440,7 +461,7 @@ function PortfolioDialog({ initial, cash, onClose }: { initial: number; cash: nu
           <div className="text-sm font-semibold text-foreground">资金设置</div>
           <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
         </div>
-        {([['初始本金（计算总盈亏%）', cap, setCap], ['当前可用资金（现金）', c, setC]] as const).map(([label, v, set]) => (
+        {([['初始本金（计算总盈亏%）', cap, setCap], ['当前可用资金（现金）', c, setC], ['累计出金', w, setW]] as const).map(([label, v, set]) => (
           <label key={label} className="flex flex-col gap-1.5 text-xs">
             <span className="text-secondary">{label}</span>
             <input type="number" step="any" value={v} onChange={e => set(e.target.value)}
@@ -551,6 +572,134 @@ function ShotSummaryBlock({
       </div>
     </div>
   )
+}
+
+function HoldingsSettingsDialog({ accountName, onClose }: { accountName: string; onClose: () => void }) {
+  const qc = useQueryClient()
+  const settings = useQuery({ queryKey: ['holdings-settings'], queryFn: api.holdingsSettings })
+  const [hkRate, setHkRate] = useState('')
+  const [usRate, setUsRate] = useState('')
+  const [deposit, setDeposit] = useState('')
+  const [bench, setBench] = useState('000001.SH')
+  const [keep, setKeep] = useState('')
+  const [confirmReset, setConfirmReset] = useState(false)
+  const loaded = useRef(false)
+
+  useEffect(() => {
+    if (loaded.current || !settings.data) return
+    loaded.current = true
+    const d = settings.data
+    setHkRate(String(d.hk_rate)); setUsRate(String(d.us_rate))
+    setDeposit(String(Math.round(d.hk_deposit_rate * 1000) / 10)); setBench(d.benchmark)
+    setKeep(d.snapshot_keep ? String(d.snapshot_keep) : '')
+  }, [settings.data])
+
+  const save = useMutation({
+    mutationFn: () => api.holdingsUpdateSettings({
+      hk_rate: Number(hkRate) || undefined,
+      us_rate: Number(usRate) || undefined,
+      hk_deposit_rate: deposit ? Number(deposit) / 100 : undefined,
+      benchmark: bench,
+      snapshot_keep: keep ? Number(keep) : 0,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['holdings-settings'] })
+      refreshHoldingsCaches(qc)
+      toast('设置已保存', 'success')
+      onClose()
+    },
+  })
+
+  const reset = useMutation({
+    mutationFn: () => api.holdingsReset(accountName === '__all__' ? 'default' : accountName, true),
+    onSuccess: (res) => {
+      setConfirmReset(false)
+      refreshHoldingsCaches(qc)
+      toast(`已重置 ${res.account} 账户（清除 ${res.removed} 条持仓与快照）`, 'success')
+      onClose()
+    },
+  })
+
+  const benches: [string, string][] = [
+    ['000001.SH', '上证指数'],
+    ['399001.SZ', '深证成指'],
+    ['HSI', '恒生指数'],
+    ['SPX', '标普500'],
+  ]
+
+  const numField = (label: string, hint: string, v: string, set: (x: string) => void, step = '0.01') => (
+    <label className="flex items-center justify-between gap-3 text-xs">
+      <span className="text-secondary">{label}<span className="text-muted ml-1">{hint}</span></span>
+      <input type="number" step={step} value={v} onChange={e => set(e.target.value)}
+        className="w-28 h-8 px-2 rounded-btn bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+    </label>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative rounded-card border border-border bg-surface shadow-2xl w-[24rem] max-w-[92vw] max-h-[86vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <div className="text-sm font-semibold text-foreground">持仓设置</div>
+          <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <div className="space-y-2.5">
+            <div className="text-[11px] font-medium text-secondary">汇率与口径</div>
+            {numField('港币兑人民币', '港股市值折算', hkRate, setHkRate)}
+            {numField('美元兑人民币', '美股市值折算', usRate, setUsRate)}
+            {numField('港股通押金率%', '成本口径说明', deposit, setDeposit, '0.1')}
+            <div className="text-[10px] text-muted leading-relaxed">
+              港股通买入时按参考汇率+约3%押金预冻结人民币，日终按实际结算汇率清算、多退少补——券商展示的成本价含此缓冲，实际成本以清算为准。
+            </div>
+          </div>
+          <div className="space-y-2.5 pt-3 border-t border-border/60">
+            <div className="text-[11px] font-medium text-secondary">收益基准</div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {benches.map(([k, label]) => (
+                <button key={k} onClick={() => setBench(k)}
+                  className={`py-1.5 rounded-btn text-[11px] ${bench === k ? 'bg-accent/15 text-accent font-medium' : 'text-secondary hover:bg-elevated'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2.5 pt-3 border-t border-border/60">
+            <div className="text-[11px] font-medium text-secondary">快照保留</div>
+            {numField('保留份数', '0=全部保留', keep, setKeep, '1')}
+          </div>
+          <button onClick={() => save.mutate()} disabled={save.isPending}
+            className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+            {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}保存设置
+          </button>
+          <div className="pt-3 border-t border-border/60 space-y-2">
+            <div className="text-[11px] font-medium text-danger/80">危险操作</div>
+            {!confirmReset ? (
+              <button onClick={() => setConfirmReset(true)}
+                className="w-full h-8 rounded-btn border border-danger/30 text-danger/80 text-xs hover:bg-danger/10">
+                重置「{accountName}」账户数据（持仓+快照+资金）
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={() => setConfirmReset(false)} className="flex-1 h-8 rounded-btn bg-elevated text-secondary text-xs">取消</button>
+                <button onClick={() => reset.mutate()} disabled={reset.isPending}
+                  className="flex-1 h-8 rounded-btn bg-danger/90 text-white text-xs font-medium disabled:opacity-40 inline-flex items-center justify-center gap-1">
+                  {reset.isPending && <Loader2 className="h-3 w-3 animate-spin" />}确认重置
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function refreshHoldingsCaches(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: QK.holdings })
+  qc.invalidateQueries({ queryKey: QK.holdingsSummary })
+  qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
+  qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
 }
 
 function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
@@ -742,7 +891,7 @@ function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void;
           const patch: { cash?: number; initial_cap?: number } = {}
           if (syncCash && shotSummary?.cash_available != null) patch.cash = shotSummary.cash_available
           const capN = Number(baseCap)
-          if (capN > 0 && capN !== (await qc.fetchQuery({ queryKey: QK.holdingsSummary, queryFn: api.holdingsSummary })).initial_cap) patch.initial_cap = capN
+          if (capN > 0 && capN !== (await qc.fetchQuery({ queryKey: ['holdings-summary-base'], queryFn: () => api.holdingsSummary() })).initial_cap) patch.initial_cap = capN
           if (Object.keys(patch).length) await api.holdingsPortfolio(patch)
           qc.invalidateQueries({ queryKey: QK.holdingsSummary })
         }
@@ -1064,6 +1213,7 @@ export function Holdings() {
   const [showPortfolio, setShowPortfolio] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [dayDetail, setDayDetail] = useState<string | null>(null)
   const [showAi, setShowAi] = useState(false)
   const [aiKey, setAiKey] = useState(0)
@@ -1072,23 +1222,34 @@ export function Holdings() {
   const [sortKey, setSortKey] = useState<SortKey>('market_value')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
+  // 账户
+  const accountsQ = useQuery({ queryKey: ['holdings-accounts'], queryFn: api.holdingsAccounts })
+  const [activeAcc, setActiveAcc] = useState<string>('')
+  const accounts = accountsQ.data?.accounts ?? []
+  useEffect(() => {
+    if (!activeAcc && accountsQ.data?.active) setActiveAcc(accountsQ.data.active)
+  }, [accountsQ.data, activeAcc])
+
   const holdings = useQuery({
-    queryKey: QK.holdings, queryFn: () => api.holdingsList(),
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
+    queryKey: [...QK.holdings, activeAcc], queryFn: () => api.holdingsList(false, activeAcc || undefined),
+    enabled: !!activeAcc, refetchInterval: 15_000, refetchOnWindowFocus: true,
   })
   const summary = useQuery({
-    queryKey: QK.holdingsSummary, queryFn: () => api.holdingsSummary(),
-    refetchInterval: 15_000, refetchOnWindowFocus: true,
+    queryKey: [...QK.holdingsSummary, activeAcc], queryFn: () => api.holdingsSummary(activeAcc || undefined),
+    enabled: !!activeAcc, refetchInterval: 15_000, refetchOnWindowFocus: true,
   })
   const pnl = useQuery({
-    queryKey: QK.holdingsPnl(`${year}-01-01`), queryFn: () => api.holdingsPnl(`${year}-01-01`),
-    refetchInterval: 120_000,
+    queryKey: [...QK.holdingsPnl(`${year}-01-01`), activeAcc],
+    queryFn: () => api.holdingsPnl(`${year}-01-01`, undefined, activeAcc || undefined),
+    enabled: !!activeAcc, refetchInterval: 120_000,
   })
   const benchmark = useQuery({
-    queryKey: ['holdings-benchmark', year],
-    queryFn: () => api.holdingsBenchmark(`${year}-01-01`),
-    enabled: tab === 'year',
+    queryKey: ['holdings-benchmark', year, activeAcc],
+    queryFn: async () => {
+      const st = await api.holdingsSettings()
+      return api.holdingsBenchmark(`${year}-01-01`, st.benchmark)
+    },
+    enabled: tab === 'year' && !!activeAcc,
   })
 
   const rows = useMemo(() => {
@@ -1186,6 +1347,17 @@ export function Holdings() {
         <h1 className="text-base font-bold text-foreground">我的持仓</h1>
         <span className="text-xs text-muted">{rows.length} 只</span>
         <div className="flex-1" />
+        <select
+          value={activeAcc}
+          onChange={e => { setActiveAcc(e.target.value); refreshAll() }}
+          className="h-7 px-2 rounded-btn bg-elevated border border-border text-xs text-foreground focus:outline-none focus:border-accent/50"
+          title="切换账户"
+        >
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated" title="持仓设置">
+          <SettingsIcon className="h-4 w-4" />
+        </button>
         <button
           onClick={() => { setShowAi(true); setAiKey(k => k + 1) }}
           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn border border-violet-500/40 bg-violet-500/10 text-violet-400 text-xs font-medium hover:bg-violet-500/20"
@@ -1344,8 +1516,14 @@ export function Holdings() {
       </div>
 
       {editing && <EditDialog row={editing} onClose={() => setEditing(null)} />}
-      {showPortfolio && s && <PortfolioDialog initial={s.initial_cap} cash={s.cash} onClose={() => setShowPortfolio(false)} />}
+      {showPortfolio && s && <PortfolioDialog initial={s.initial_cap} cash={s.cash} withdrawals={s.withdrawals} onClose={() => setShowPortfolio(false)} />}
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}
+      {showSettings && summary?.data && (
+        <HoldingsSettingsDialog
+          accountName={accounts.find(a => a.id === activeAcc)?.name || activeAcc}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
       {showImport && (
         <HoldingsImportDialog
           key={dropKey}

@@ -1,15 +1,18 @@
-"""我的持仓服务。
+"""我的持仓服务 (多账户)。
 
-存储:
-- `data/user_data/holdings.parquet`: symbol, qty, available, avg_cost, opened_at, status(open/closed), closed_at, realized_pnl
-- `data/user_data/portfolio.json`: {initial_cap, cash, updated_at} — 初始资金 + 当前现金 (手动维护)
+存储布局:
+- user_data/holdings/accounts.json : {accounts:[{id,name,created_at}], active:"<id>"}
+- user_data/holdings/<account_id>/holdings.parquet : symbol, qty, available, avg_cost, opened_at, status, closed_at, realized_pnl
+- user_data/holdings/<account_id>/portfolio.json   : {initial_cap, cash, withdrawals, updated_at}
+- user_data/holdings/<account_id>/snapshots/*.json : 历史快照
 
-全量读写小文件 (与 watchlist 同模式); 卖出记录已实现盈亏, status=closed 后自选/详情不再显示持仓徽章。
+旧版单账户文件 (user_data/holdings.parquet 等) 首次访问时自动迁移到 default 账户。
 """
 from __future__ import annotations
 
 import json
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,19 +34,134 @@ _SCHEMA = {
     "realized_pnl": pl.Float64,
 }
 
+DEFAULT_ACCOUNT = "default"
 
-def _path() -> Path:
-    p = settings.data_dir / "user_data" / "holdings.parquet"
+
+# ---------------------------------------------------------------- 账户
+
+
+def _base_dir() -> Path:
+    return settings.data_dir / "user_data" / "holdings"
+
+
+def _accounts_path() -> Path:
+    p = _base_dir() / "accounts.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
 
-def _portfolio_path() -> Path:
-    return settings.data_dir / "user_data" / "portfolio.json"
+def _migrate_legacy() -> None:
+    """旧单账户文件 → default 账户目录 (一次性)。直接拼路径, 不经 _acc_dir 避免互递归。"""
+    acc_dir = _base_dir() / DEFAULT_ACCOUNT
+    if acc_dir.exists():
+        return
+    legacy = settings.data_dir / "user_data"
+    moved = False
+    acc_dir.mkdir(parents=True, exist_ok=True)
+    for name, target in (
+        ("holdings.parquet", "holdings.parquet"),
+        ("portfolio.json", "portfolio.json"),
+    ):
+        src = legacy / name
+        if src.exists():
+            shutil.move(str(src), str(acc_dir / target))
+            moved = True
+    legacy_snaps = legacy / "holdings_snapshots"
+    if legacy_snaps.is_dir():
+        shutil.move(str(legacy_snaps), str(acc_dir / "snapshots"))
+        moved = True
+    if moved:
+        logger.info("legacy holdings migrated to account '%s'", DEFAULT_ACCOUNT)
 
 
-def _read() -> pl.DataFrame:
-    p = _path()
+def _acc_dir(account_id: str) -> Path:
+    _migrate_legacy()
+    p = _base_dir() / account_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def list_accounts() -> dict[str, Any]:
+    path = _accounts_path()
+    try:
+        obj = json.loads(path.read_text("utf-8"))
+        if obj.get("accounts"):
+            return obj
+    except Exception:  # noqa: BLE001
+        pass
+    obj = {"accounts": [{"id": DEFAULT_ACCOUNT, "name": "默认账户", "created_at": datetime.utcnow().isoformat(timespec="seconds")}],
+           "active": DEFAULT_ACCOUNT}
+    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), "utf-8")
+    return obj
+
+
+def save_accounts(obj: dict[str, Any]) -> None:
+    _accounts_path().write_text(json.dumps(obj, ensure_ascii=False, indent=2), "utf-8")
+
+
+def resolve_account(account_id: str | None) -> str:
+    """显式指定优先; 否则 active。未知 id 回退 default。"""
+    obj = list_accounts()
+    ids = {a["id"] for a in obj["accounts"]}
+    if account_id and account_id in ids:
+        return account_id
+    if obj.get("active") in ids:
+        return obj["active"]
+    return DEFAULT_ACCOUNT
+
+
+def create_account(name: str) -> dict[str, Any]:
+    obj = list_accounts()
+    account_id = f"acc_{int(datetime.utcnow().timestamp() * 1000)}"
+    acc = {"id": account_id, "name": name or f"账户{len(obj['accounts']) + 1}",
+           "created_at": datetime.utcnow().isoformat(timespec="seconds")}
+    obj["accounts"].append(acc)
+    obj["active"] = account_id
+    save_accounts(obj)
+    _acc_dir(account_id)
+    return acc
+
+
+def rename_account(account_id: str, name: str) -> dict[str, Any]:
+    obj = list_accounts()
+    for a in obj["accounts"]:
+        if a["id"] == account_id:
+            a["name"] = name
+    save_accounts(obj)
+    return obj
+
+
+def delete_account(account_id: str) -> dict[str, Any]:
+    if account_id == DEFAULT_ACCOUNT:
+        raise ValueError("默认账户不可删除")
+    obj = list_accounts()
+    obj["accounts"] = [a for a in obj["accounts"] if a["id"] != account_id]
+    if obj.get("active") == account_id:
+        obj["active"] = obj["accounts"][0]["id"] if obj["accounts"] else DEFAULT_ACCOUNT
+    save_accounts(obj)
+    d = _base_dir() / account_id
+    if d.is_dir():
+        shutil.rmtree(d, ignore_errors=True)
+    return obj
+
+
+def set_active_account(account_id: str) -> dict[str, Any]:
+    obj = list_accounts()
+    if account_id in {a["id"] for a in obj["accounts"]}:
+        obj["active"] = account_id
+        save_accounts(obj)
+    return obj
+
+
+# ---------------------------------------------------------------- 持仓 CRUD
+
+
+def _schema_path(account_id: str) -> Path:
+    return _acc_dir(account_id) / "holdings.parquet"
+
+
+def _read(account_id: str) -> pl.DataFrame:
+    p = _schema_path(account_id)
     if not p.exists():
         return pl.DataFrame(schema=_SCHEMA)
     df = pl.read_parquet(p)
@@ -53,12 +171,12 @@ def _read() -> pl.DataFrame:
     return df
 
 
-def _write(df: pl.DataFrame) -> None:
-    df.write_parquet(_path())
+def _write(account_id: str, df: pl.DataFrame) -> None:
+    df.write_parquet(_schema_path(account_id))
 
 
-def list_all(include_closed: bool = False) -> list[dict[str, Any]]:
-    df = _read()
+def list_all(account_id: str, include_closed: bool = False) -> list[dict[str, Any]]:
+    df = _read(account_id)
     if df.is_empty():
         return []
     if not include_closed:
@@ -66,20 +184,15 @@ def list_all(include_closed: bool = False) -> list[dict[str, Any]]:
     return df.sort("symbol").to_dicts()
 
 
-def get(symbol: str) -> dict[str, Any] | None:
-    df = _read()
+def get(account_id: str, symbol: str) -> dict[str, Any] | None:
+    df = _read(account_id)
     hit = df.filter((pl.col("symbol") == symbol) & (pl.col("status") != "closed"))
     return hit.to_dicts()[0] if not hit.is_empty() else None
 
 
-def upsert(
-    symbol: str,
-    qty: float,
-    available: float | None = None,
-    avg_cost: float | None = None,
-) -> list[dict]:
-    """新增或编辑持仓 (数量/可用/成本)。已 closed 的同名持仓按新增处理。"""
-    df = _read()
+def upsert(account_id: str, symbol: str, qty: float,
+           available: float | None = None, avg_cost: float | None = None) -> list[dict]:
+    df = _read(account_id)
     df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
     row = {
         "symbol": symbol,
@@ -92,16 +205,12 @@ def upsert(
         "realized_pnl": None,
     }
     out = pl.concat([pl.DataFrame([row], schema=_SCHEMA), df], how="diagonal_relaxed")
-    _write(out)
-    return list_all()
+    _write(account_id, out)
+    return list_all(account_id)
 
 
-def sell(symbol: str, price: float, qty: float | None = None) -> dict[str, Any]:
-    """卖出: 记录已实现盈亏后置 closed。qty 缺省为全部持仓。
-
-    realized_pnl = (卖出价 - 成本) × 卖出数量; 部分卖出时剩余数量与成本不变。
-    """
-    h = get(symbol)
+def sell(account_id: str, symbol: str, price: float, qty: float | None = None) -> dict[str, Any]:
+    h = get(account_id, symbol)
     if h is None:
         raise ValueError(f"{symbol} 不在持仓中")
     cost = h.get("avg_cost") or 0.0
@@ -109,9 +218,8 @@ def sell(symbol: str, price: float, qty: float | None = None) -> dict[str, Any]:
     sell_qty = min(sell_qty, float(h["qty"]))
     realized = (float(price) - float(cost)) * sell_qty
 
-    df = _read()
+    df = _read(account_id)
     if sell_qty >= float(h["qty"]) - 1e-9:
-        # 全部卖出 → closed, 保留记录 (realized 累加)
         prev = h.get("realized_pnl") or 0.0
         df = df.filter((pl.col("symbol") != symbol) | (pl.col("status") != "open"))
         row = {
@@ -129,9 +237,7 @@ def sell(symbol: str, price: float, qty: float | None = None) -> dict[str, Any]:
         remain = float(h["qty"]) - sell_qty
         df = df.with_columns(
             pl.when((pl.col("symbol") == symbol) & (pl.col("status") != "closed"))
-            .then(
-                pl.min_horizontal(pl.col("available") - sell_qty, pl.lit(remain)).clip(lower_bound=0.0)
-            )
+            .then(pl.min_horizontal(pl.col("available") - sell_qty, pl.lit(remain)).clip(lower_bound=0.0))
             .otherwise(pl.col("available"))
             .alias("available")
         ).with_columns(
@@ -145,68 +251,91 @@ def sell(symbol: str, price: float, qty: float | None = None) -> dict[str, Any]:
             .otherwise(pl.col("realized_pnl"))
             .alias("realized_pnl")
         )
-    _write(df)
+    _write(account_id, df)
     return {"symbol": symbol, "realized_pnl": realized}
 
 
-def remove(symbol: str) -> list[dict]:
-    """彻底删除持仓记录 (含 closed)。"""
-    df = _read().filter(pl.col("symbol") != symbol)
-    _write(df)
-    return list_all(include_closed=True)
+def remove(account_id: str, symbol: str) -> list[dict]:
+    df = _read(account_id).filter(pl.col("symbol") != symbol)
+    _write(account_id, df)
+    return list_all(account_id, include_closed=True)
 
 
-def clear() -> int:
-    df = _read()
+def reset(account_id: str, include_portfolio: bool = True) -> int:
+    """重置当前账户: 清空持仓与快照 (可选资金设置)。返回删除的持仓行数。"""
+    df = _read(account_id)
     n = df.height
-    if n:
-        pl.DataFrame(schema=_SCHEMA).write_parquet(_path())
+    pl.DataFrame(schema=_SCHEMA).write_parquet(_schema_path(account_id))
+    snap = _acc_dir(account_id) / "snapshots"
+    if snap.is_dir():
+        shutil.rmtree(snap, ignore_errors=True)
+    if include_portfolio:
+        p = _acc_dir(account_id) / "portfolio.json"
+        p.unlink(missing_ok=True)
     return n
 
 
 # ---------------------------------------------------------------- 组合资金
 
 
-def get_portfolio() -> dict[str, Any]:
-    p = _portfolio_path()
+def _portfolio_path(account_id: str) -> Path:
+    return _acc_dir(account_id) / "portfolio.json"
+
+
+def get_portfolio(account_id: str) -> dict[str, Any]:
+    p = _portfolio_path(account_id)
     try:
         obj = json.loads(p.read_text("utf-8"))
         return {
             "initial_cap": float(obj.get("initial_cap") or 0.0),
             "cash": float(obj.get("cash") or 0.0),
+            "withdrawals": float(obj.get("withdrawals") or 0.0),
             "updated_at": obj.get("updated_at"),
         }
     except Exception:  # noqa: BLE001
-        return {"initial_cap": 0.0, "cash": 0.0, "updated_at": None}
+        return {"initial_cap": 0.0, "cash": 0.0, "withdrawals": 0.0, "updated_at": None}
 
 
-def set_portfolio(initial_cap: float | None = None, cash: float | None = None) -> dict[str, Any]:
-    cur = get_portfolio()
+def set_portfolio(account_id: str, initial_cap: float | None = None,
+                  cash: float | None = None, withdrawals: float | None = None) -> dict[str, Any]:
+    cur = get_portfolio(account_id)
     obj = {
         "initial_cap": float(initial_cap) if initial_cap is not None else cur["initial_cap"],
         "cash": float(cash) if cash is not None else cur["cash"],
+        "withdrawals": float(withdrawals) if withdrawals is not None else cur["withdrawals"],
         "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
-    _portfolio_path().write_text(json.dumps(obj, ensure_ascii=False), "utf-8")
+    _portfolio_path(account_id).write_text(json.dumps(obj, ensure_ascii=False), "utf-8")
     return obj
 
 
 # ---------------------------------------------------------------- 历史快照
 
 
-def _snap_dir() -> Path:
-    p = settings.data_dir / "user_data" / "holdings_snapshots"
+def _snap_dir(account_id: str) -> Path:
+    p = _acc_dir(account_id) / "snapshots"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
-def save_snapshot(date_iso: str, rows: list[dict] | None = None, cash: float | None = None) -> dict:
-    """保存某交易日的持仓快照 (截图导入历史日期时写入)。
+def _cleanup_snapshots(account_id: str, keep: int) -> None:
+    """快照保留策略: 超出 keep 份时清理最旧 (keep<=0 = 全部保留)。"""
+    if keep <= 0:
+        return
+    snaps = sorted(_snap_dir(account_id).glob("*.json"))
+    for f in snaps[:-keep] if len(snaps) > keep else []:
+        f.unlink(missing_ok=True)
 
-    rows 缺省 = 当前持仓; cash 缺省 = 当前资金。覆盖同日已有快照。
-    """
-    obj_rows = rows if rows is not None else list_all()
-    port = get_portfolio()
+
+def snapshot_keep_limit() -> int:
+    from app.services import preferences
+
+    return preferences.get_holdings_snapshot_keep()
+
+
+def save_snapshot(account_id: str, date_iso: str, rows: list[dict] | None = None, cash: float | None = None) -> dict:
+    obj_rows = rows if rows is not None else list_all(account_id)
+    port = get_portfolio(account_id)
     obj = {
         "date": date_iso,
         "cash": float(cash) if cash is not None else port["cash"],
@@ -217,15 +346,16 @@ def save_snapshot(date_iso: str, rows: list[dict] | None = None, cash: float | N
         ],
         "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
-    (_snap_dir() / f"{date_iso.replace('-', '')}.json").write_text(
+    (_snap_dir(account_id) / f"{date_iso.replace('-', '')}.json").write_text(
         json.dumps(obj, ensure_ascii=False), "utf-8"
     )
+    _cleanup_snapshots(account_id, snapshot_keep_limit())
     return obj
 
 
-def list_snapshots() -> list[dict]:
+def list_snapshots(account_id: str) -> list[dict]:
     out = []
-    for f in sorted(_snap_dir().glob("*.json")):
+    for f in sorted(_snap_dir(account_id).glob("*.json")):
         try:
             out.append(json.loads(f.read_text("utf-8")))
         except Exception:  # noqa: BLE001
@@ -234,18 +364,15 @@ def list_snapshots() -> list[dict]:
     return out
 
 
-def snapshot_timeline() -> list[dict]:
-    """返回分段时间线: 快照(按日期升序) + 末尾当前持仓 (date=今天)。
-
-    每段: {date, cash, rows:[{symbol,qty,avg_cost}]} — 该日期起生效的组合状态。
-    """
+def snapshot_timeline(account_id: str) -> list[dict]:
+    """分段时间线: 快照(升序) + 末尾当前持仓 (date=今天)。"""
     segs: list[dict] = [
         {"date": s["date"], "cash": float(s.get("cash") or 0), "rows": s.get("rows") or []}
-        for s in list_snapshots()
+        for s in list_snapshots(account_id)
     ]
     today = datetime.utcnow().date().isoformat()
-    cur = list_all()
-    port = get_portfolio()
+    cur = list_all(account_id)
+    port = get_portfolio(account_id)
     if cur:
         segs.append({
             "date": today,
@@ -255,7 +382,6 @@ def snapshot_timeline() -> list[dict]:
                 for r in cur
             ],
         })
-    # 同日去重 (快照与今日重合时保留后者)
     dedup: dict[str, dict] = {}
     for s in segs:
         dedup[s["date"]] = s

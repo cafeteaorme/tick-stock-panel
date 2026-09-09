@@ -90,6 +90,22 @@ def get_minute_sync_enabled() -> bool:
     return load().get("minute_sync_enabled", False)
 
 
+def get_holdings_settings() -> dict:
+    """持仓模块全局设置: 汇率/押金率/基准/快照保留。"""
+    d = load()
+    return {
+        "hk_rate": float(d.get("holdings_hk_rate", 0.92)),        # 港币→人民币
+        "us_rate": float(d.get("holdings_us_rate", 7.2)),         # 美元→人民币
+        "hk_deposit_rate": float(d.get("holdings_hk_deposit_rate", 0.03)),  # 港股通押金率(口径说明)
+        "benchmark": d.get("holdings_benchmark", "000001.SH"),    # 收益基准指数
+        "snapshot_keep": int(d.get("holdings_snapshot_keep", 0)), # 0=全部保留
+    }
+
+
+def get_holdings_snapshot_keep() -> int:
+    return int(load().get("holdings_snapshot_keep", 0))
+
+
 def get_hk_us_intraday_enabled() -> bool:
     """港美股分时图 (腾讯免费接口, 点击加载 + 当日已看后台刷新) 是否开启。默认关。"""
     return load().get("hk_us_intraday_enabled", False)

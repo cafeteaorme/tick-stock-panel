@@ -1,17 +1,21 @@
-"""我的持仓 API。"""
+"""我的持仓 API (多账户)。
+
+所有端点支持 account 查询参数 (缺省 = active 账户)。
+外币持仓 (HK/US) 市值按全局设置汇率折算为人民币计入总资产。
+"""
 from __future__ import annotations
 
 import logging
-import time
 from datetime import date, timedelta
 from typing import Any
 
 import polars as pl
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.services import holdings as holdings_service
 from app.markets import HK, US, get_region, is_hk_or_us
+from app.services import holdings as holdings_service
 from app.services import watchlist as watchlist_service
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,7 @@ class SellRequest(BaseModel):
 class PortfolioRequest(BaseModel):
     initial_cap: float | None = None
     cash: float | None = None
+    withdrawals: float | None = None
 
 
 class BatchImportRequest(BaseModel):
@@ -42,8 +47,42 @@ class BatchImportRequest(BaseModel):
     cash: float | None = None
 
 
+class AccountRequest(BaseModel):
+    name: str
+
+
+class ResetRequest(BaseModel):
+    include_portfolio: bool = True
+
+
+class SettingsRequest(BaseModel):
+    hk_rate: float | None = None
+    us_rate: float | None = None
+    hk_deposit_rate: float | None = None
+    benchmark: str | None = None
+    snapshot_keep: int | None = None
+
+
+def _acc(request: Request, account: str | None) -> str:
+    return holdings_service.resolve_account(account)
+
+
+def _rates() -> dict:
+    from app.services import preferences
+
+    return preferences.get_holdings_settings()
+
+
+def _fx_rate(region: str, rates: dict) -> float:
+    """外币→人民币; CN 恒为 1。"""
+    if region == HK:
+        return rates.get("hk_rate") or 1.0
+    if region == US:
+        return rates.get("us_rate") or 1.0
+    return 1.0
+
+
 def _fetch_quotes_map(request: Request, symbols: list[str]) -> dict[str, dict]:
-    """symbol → 实时行情 (TickFlow quotes, A股/港美股通用)。失败返回空。"""
     if not symbols:
         return {}
     capset = getattr(request.app.state, "capabilities", None)
@@ -54,17 +93,11 @@ def _fetch_quotes_map(request: Request, symbols: list[str]) -> dict[str, dict]:
     except Exception as e:  # noqa: BLE001
         logger.warning("holdings quotes failed: %s", e)
         return {}
-    out = {}
-    for r in rows or []:
-        sym = r.get("symbol")
-        if not sym:
-            continue
-        out[sym] = r
-    return out
+    return {r.get("symbol"): r for r in rows or [] if r.get("symbol")}
 
 
-def _enrich_rows(request: Request, rows: list[dict]) -> list[dict]:
-    """给持仓行附加现价/涨跌幅/市值/浮动盈亏/当日盈亏。"""
+def _enrich_rows(request: Request, rows: list[dict], rates: dict) -> list[dict]:
+    """附加现价/涨跌幅/市值(人民币)/浮动盈亏/当日盈亏。"""
     symbols = [r["symbol"] for r in rows]
     repo = request.app.state.repo
     quotes = _fetch_quotes_map(request, symbols)
@@ -77,52 +110,95 @@ def _enrich_rows(request: Request, rows: list[dict]) -> list[dict]:
         pct = q.get("pct")
         qty = float(r.get("qty") or 0)
         cost = float(r.get("avg_cost") or 0)
-        market_value = price * qty if price is not None else None
-        float_pnl = (price - cost) * qty if price is not None and cost else None
-        day_pnl = float_pnl / (1 + pct) * pct if (float_pnl is not None and pct not in (None, -1)) else None
-        # 更稳的当日盈亏: 市值 - 市值/(1+pct)
-        if price is not None and pct is not None and (1 + pct) != 0:
+        region = get_region(r["symbol"])
+        fx = _fx_rate(region, rates)
+        market_value = price * qty * fx if price is not None else None
+        # 成本同样按汇率折算 (港币成本 → 人民币口径)
+        cost_cny = cost * fx if cost else 0.0
+        float_pnl = (price * fx - cost_cny) * qty if price is not None and cost else None
+        day_pnl = None
+        if market_value is not None and pct is not None and (1 + pct) != 0:
             day_pnl = market_value - market_value / (1 + pct)
         out.append({
             **r,
             "name": name_map.get(r["symbol"]),
-            "region": get_region(r["symbol"]),
+            "region": region,
+            "fx": fx,
             "price": price,
             "change_pct": pct,
             "change_amount": q.get("ext.change_amount"),
             "market_value": market_value,
             "float_pnl": float_pnl,
-            "float_pnl_pct": ((price - cost) / cost) if (price is not None and cost) else None,
+            "float_pnl_pct": ((price * fx - cost_cny) / cost_cny) if (price is not None and cost_cny) else None,
             "day_pnl": day_pnl,
         })
     return out
 
 
+# ---------------------------------------------------------------- 账户管理
+
+
+@router.get("/accounts")
+def accounts():
+    return holdings_service.list_accounts()
+
+
+@router.post("/accounts")
+def create_account(req: AccountRequest):
+    return holdings_service.create_account(req.name)
+
+
+@router.put("/accounts/active")
+def set_active(req: dict):
+    account = req.get("account")
+    if not account:
+        raise HTTPException(400, "缺少 account")
+    return holdings_service.set_active_account(account)
+
+
+@router.put("/accounts/{account_id}")
+def rename_account(account_id: str, req: AccountRequest):
+    return holdings_service.rename_account(account_id, req.name)
+
+
+@router.delete("/accounts/{account_id}")
+def delete_account(account_id: str):
+    try:
+        return holdings_service.delete_account(account_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+# ---------------------------------------------------------------- 持仓
+
+
 @router.get("")
-def list_holdings(request: Request, include_closed: bool = Query(False)):
-    """持仓列表 (含实时行情与盈亏)。closed 记录仅在 include_closed 时返回。"""
-    rows = holdings_service.list_all(include_closed=include_closed)
+def list_holdings(request: Request, include_closed: bool = Query(False), account: str | None = Query(None)):
+    acc = _acc(request, account)
+    rows = holdings_service.list_all(acc, include_closed=include_closed)
     open_rows = [r for r in rows if r.get("status") != "closed"]
-    enriched = _enrich_rows(request, open_rows)
+    enriched = _enrich_rows(request, open_rows, _rates())
     if include_closed:
         enriched = enriched + [r for r in rows if r.get("status") == "closed"]
-    return {"rows": enriched}
+    return {"rows": enriched, "account": acc}
 
 
 @router.get("/summary")
-def summary(request: Request):
-    """组合汇总: 总资产/仓位/总盈亏(浮动+已实现)/当日盈亏/个股贡献。"""
-    rows = holdings_service.list_all()
-    enriched = _enrich_rows(request, rows)
-    portfolio = holdings_service.get_portfolio()
+def summary(request: Request, account: str | None = Query(None)):
+    acc = _acc(request, account)
+    rates = _rates()
+    rows = holdings_service.list_all(acc)
+    enriched = _enrich_rows(request, rows, rates)
+    portfolio = holdings_service.get_portfolio(acc)
 
     total_value = sum(r["market_value"] or 0 for r in enriched)
     total_asset = portfolio["cash"] + total_value
     float_pnl = sum(r["float_pnl"] or 0 for r in enriched)
-    closed_rows = holdings_service.list_all(include_closed=True)
+    closed_rows = holdings_service.list_all(acc, include_closed=True)
     realized = sum(float(r.get("realized_pnl") or 0) for r in closed_rows if r.get("status") == "closed")
     day_pnl = sum(r["day_pnl"] or 0 for r in enriched)
     initial = portfolio["initial_cap"]
+    withdrawals = portfolio.get("withdrawals", 0.0)
 
     contributions = sorted(
         ({"symbol": r["symbol"], "name": r["name"], "float_pnl": r["float_pnl"], "market_value": r["market_value"]} for r in enriched),
@@ -130,7 +206,9 @@ def summary(request: Request):
         reverse=True,
     )
     return {
+        "account": acc,
         "initial_cap": initial,
+        "withdrawals": withdrawals,
         "cash": portfolio["cash"],
         "total_market_value": total_value,
         "total_asset": total_asset,
@@ -139,6 +217,8 @@ def summary(request: Request):
         "realized_pnl": realized,
         "total_pnl": float_pnl + realized,
         "total_pnl_pct": ((float_pnl + realized) / initial) if initial else None,
+        # 累计盈亏 = 本金 - 出金 - 总资产 (含浮动+已实现的总口径)
+        "cum_pnl": (initial - withdrawals - total_asset) if (initial or withdrawals) else None,
         "day_pnl": day_pnl,
         "day_pnl_pct": (day_pnl / (total_asset - day_pnl)) if (total_asset - day_pnl) else None,
         "positions": len(enriched),
@@ -148,40 +228,27 @@ def summary(request: Request):
 
 
 @router.put("/portfolio")
-def update_portfolio(req: PortfolioRequest):
-    return holdings_service.set_portfolio(req.initial_cap, req.cash)
+def update_portfolio(req: PortfolioRequest, account: str | None = Query(None)):
+    return holdings_service.set_portfolio(_acc(request, account), req.initial_cap, req.cash, req.withdrawals)
 
 
-@router.put("/{symbol}")
-def upsert_holding(symbol: str, req: UpsertRequest):
-    if req.qty <= 0:
-        raise HTTPException(400, "数量必须大于 0")
-    rows = holdings_service.upsert(symbol, req.qty, req.available, req.avg_cost)
-    return {"rows": rows}
-
-
-@router.post("/{symbol}/sell")
-def sell_holding(symbol: str, req: SellRequest):
-    try:
-        res = holdings_service.sell(symbol, req.price, req.qty)
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    return res
-
-
-@router.delete("/{symbol}")
-def remove_holding(symbol: str):
-    return {"rows": holdings_service.remove(symbol)}
+@router.post("/reset")
+def reset_data(req: ResetRequest, account: str | None = Query(None)):
+    """重置当前账户: 清空持仓+快照 (可选资金设置)。"""
+    acc = _acc(request, account)
+    removed = holdings_service.reset(acc, include_portfolio=req.include_portfolio)
+    return {"account": acc, "removed": removed}
 
 
 @router.post("/import")
-def batch_import(req: BatchImportRequest, request: Request):
+def batch_import(req: BatchImportRequest, request: Request, account: str | None = Query(None)):
     """截图识别结果批量写入持仓 (并自动加入自选)。
 
     date 为今日或缺省 → 更新当前持仓; 历史日期 → 写入该日快照 (含当日现金)。
     """
     from app.services import watchlist as wl
 
+    acc = _acc(request, account)
     today = date.today().isoformat()
     target = (req.date or today) if (req.date or today) <= today else today
     normalized = []
@@ -200,23 +267,74 @@ def batch_import(req: BatchImportRequest, request: Request):
     if target == today:
         for item in normalized:
             holdings_service.upsert(
-                item["symbol"], item["qty"], item["available"], item["avg_cost"],
+                acc, item["symbol"], item["qty"], item["available"], item["avg_cost"],
             )
             if item["symbol"] not in {r["symbol"] for r in wl.list_symbols()}:
                 wl.add(item["symbol"])
     else:
-        # 历史日期: 写快照 (金额以截图当时为准)
-        holdings_service.save_snapshot(target, rows=normalized, cash=req.cash)
+        holdings_service.save_snapshot(acc, target, rows=normalized, cash=req.cash)
 
     return {"imported": len(normalized), "date": target, "snapshot": target != today}
+
+
+# ---------------------------------------------------------------- 设置
+
+
+@router.get("/settings")
+def get_settings():
+    from app.services import preferences
+
+    return preferences.get_holdings_settings()
+
+
+@router.put("/settings")
+def update_settings(req: SettingsRequest):
+    from app.services import preferences
+
+    updates: dict = {}
+    if req.hk_rate is not None:
+        updates["holdings_hk_rate"] = max(0.01, float(req.hk_rate))
+    if req.us_rate is not None:
+        updates["holdings_us_rate"] = max(0.01, float(req.us_rate))
+    if req.hk_deposit_rate is not None:
+        updates["holdings_hk_deposit_rate"] = min(0.2, max(0.0, float(req.hk_deposit_rate)))
+    if req.benchmark:
+        updates["holdings_benchmark"] = req.benchmark
+    if req.snapshot_keep is not None:
+        updates["holdings_snapshot_keep"] = max(0, int(req.snapshot_keep))
+    if updates:
+        preferences.save(updates)
+    return preferences.get_holdings_settings()
+
+
+@router.put("/{symbol}")
+def upsert_holding(symbol: str, req: UpsertRequest, request: Request, account: str | None = Query(None)):
+    if req.qty <= 0:
+        raise HTTPException(400, "数量必须大于 0")
+    rows = holdings_service.upsert(_acc(request, account), symbol, req.qty, req.available, req.avg_cost)
+    return {"rows": rows}
+
+
+@router.post("/{symbol}/sell")
+def sell_holding(symbol: str, req: SellRequest, account: str | None = Query(None)):
+    try:
+        return holdings_service.sell(_acc(request, account), symbol, req.price, req.qty)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.delete("/{symbol}")
+def remove_holding(symbol: str, account: str | None = Query(None)):
+    return {"rows": holdings_service.remove(_acc(request, account), symbol)}
 
 
 # ---------------------------------------------------------------- 收益序列
 
 
 def _load_close_history(request: Request, symbols: list[str], start: date, end: date) -> dict[str, dict[str, float]]:
-    """{symbol: {date_iso: close}} — A股走本地 enriched batch, 港美股单只拉取。"""
+    """{symbol: {date_iso: close×汇率(人民币口径)}}"""
     repo = request.app.state.repo
+    rates = _rates()
     series: dict[str, dict[str, float]] = {}
 
     cn = [s for s in symbols if not is_hk_or_us(s)]
@@ -236,9 +354,10 @@ def _load_close_history(request: Request, symbols: list[str], start: date, end: 
 
             df = fetch_hk_us_daily_with_indicators(sym, days=max((end - start).days + 10, 30))
             if not df.is_empty() and "date" in df.columns:
+                fx = _fx_rate(get_region(sym), rates)
                 sub = df.filter((pl.col("date") >= start) & (pl.col("date") <= end))
                 for d, c in sub.select(["date", "close"]).iter_rows():
-                    series.setdefault(sym, {})[str(d)] = float(c)
+                    series.setdefault(sym, {})[str(d)] = float(c) * fx
         except Exception as e:  # noqa: BLE001
             logger.warning("holdings pnl hk/us %s failed: %s", sym, e)
     return series
@@ -249,30 +368,26 @@ def pnl(
     request: Request,
     start: str | None = Query(None, description="YYYY-MM-DD, 默认今年初"),
     end: str | None = Query(None, description="YYYY-MM-DD, 默认今天"),
+    account: str | None = Query(None),
 ):
-    """日/月/年收益序列 (快照时间线分段回算: 各段各自的数量/现金)。
-
-    daily: [{date, market_value, asset, pnl, pnl_pct}] — asset = 段内现金 + Σ close×qty
-    monthly/yearly: 对应区间的 pnl 汇总。
-    """
+    """日/月/年收益序列 (快照时间线分段回算, 人民币口径)。"""
     end_d = date.fromisoformat(end) if end else date.today()
     start_d = date.fromisoformat(start) if start else date(end_d.year, 1, 1)
 
-    timeline = holdings_service.snapshot_timeline()
+    acc = _acc(request, account)
+    timeline = holdings_service.snapshot_timeline(acc)
     if not timeline:
-        return {"daily": [], "monthly": [], "yearly": [], "cash": holdings_service.get_portfolio()["cash"]}
+        return {"daily": [], "monthly": [], "yearly": [], "cash": holdings_service.get_portfolio(acc)["cash"]}
 
-    # 无历史快照 (仅今日当前持仓一段) → 回退为当前持仓回算整个区间 (v1 行为);
-    # 有历史快照 → 从最早快照日期开始分段
     has_snapshot = len(timeline) > 1 or timeline[0]["date"] < date.today().isoformat()
     first_seg_date = timeline[0]["date"] if has_snapshot else start_d.isoformat()
     eff_start = max(start_d.isoformat(), first_seg_date)
-    if not has_snapshot:
+    if not has_snapshot and timeline[0]["date"] != eff_start:
         timeline = [{
             "date": eff_start,
             "cash": timeline[0]["cash"],
             "rows": timeline[0]["rows"],
-        }, timeline[0]] if timeline[0]["date"] != eff_start else timeline
+        }, timeline[0]]
 
     all_symbols = sorted({r["symbol"] for seg in timeline for r in seg["rows"] if r.get("qty")})
     series = _load_close_history(request, all_symbols, date.fromisoformat(eff_start) - timedelta(days=14), end_d) if all_symbols else {}
@@ -306,13 +421,13 @@ def pnl(
             if c is not None:
                 last_close[sym] = c
             value += last_close.get(sym, 0.0) * q
-        day_pnl = (value - prev_asset) if prev_asset is not None else 0.0
+        day_p = (value - prev_asset) if prev_asset is not None else 0.0
         daily.append({
             "date": d,
             "market_value": round(value - cash, 2),
             "asset": round(value, 2),
-            "pnl": round(day_pnl, 2),
-            "pnl_pct": round(day_pnl / prev_asset, 6) if prev_asset else None,
+            "pnl": round(day_p, 2),
+            "pnl_pct": round(day_p / prev_asset, 6) if prev_asset else None,
         })
         prev_asset = value
 
@@ -322,8 +437,10 @@ def pnl(
         cur_seg = timeline[-1]
         quotes = _fetch_quotes_map(request, [r["symbol"] for r in cur_seg["rows"] if r.get("qty")])
         if quotes:
+            rates = _rates()
             rt_value = cur_seg["cash"] + sum(
-                (quotes[r["symbol"]].get("price") or last_close.get(r["symbol"], 0.0)) * float(r["qty"])
+                (quotes[r["symbol"]].get("price") or last_close.get(r["symbol"], 0.0))
+                * float(r["qty"]) * _fx_rate(get_region(r["symbol"]), rates)
                 for r in cur_seg["rows"] if r.get("qty")
             )
             prev = daily[-2]["asset"] if len(daily) >= 2 else None
@@ -347,15 +464,17 @@ def pnl(
         "monthly": _agg(7),
         "yearly": _agg(4),
         "cash": timeline[-1]["cash"],
-        "initial_cap": holdings_service.get_portfolio()["initial_cap"],
+        "initial_cap": holdings_service.get_portfolio(acc)["initial_cap"],
         "snapshots": [seg["date"] for seg in timeline],
+        "account": acc,
     }
 
 
 @router.get("/pnl/day/{day}")
-def pnl_day_detail(request: Request, day: str):
+def pnl_day_detail(request: Request, day: str, account: str | None = Query(None)):
     """某日各持仓的盈亏明细 (收益日历点击弹窗用)。"""
-    timeline = holdings_service.snapshot_timeline()
+    acc = _acc(request, account)
+    timeline = holdings_service.snapshot_timeline(acc)
     if not timeline:
         return {"date": day, "rows": [], "total": 0}
 
@@ -375,6 +494,7 @@ def pnl_day_detail(request: Request, day: str):
 
     repo = request.app.state.repo
     name_map = repo.get_name_map(symbols)
+    rates = _rates()
     out = []
     total = 0.0
     for r in rows:
@@ -387,14 +507,14 @@ def pnl_day_detail(request: Request, day: str):
             continue
         c_today = closes[sorted_dates[d_idx]]
         c_prev = closes[sorted_dates[d_idx - 1]] if d_idx > 0 else None
-        pnl = (c_today - c_prev) * q if c_prev is not None else 0.0
-        total += pnl
+        pnl_v = (c_today - c_prev) * q if c_prev is not None else 0.0
+        total += pnl_v
         out.append({
             "symbol": sym,
             "name": name_map.get(sym),
             "qty": q,
             "close": c_today,
-            "pnl": round(pnl, 2),
+            "pnl": round(pnl_v, 2),
             "pnl_pct": round((c_today - c_prev) / c_prev, 6) if c_prev else None,
         })
     out.sort(key=lambda x: x["pnl"], reverse=True)
@@ -404,7 +524,7 @@ def pnl_day_detail(request: Request, day: str):
 @router.get("/benchmark")
 def benchmark(
     request: Request,
-    symbol: str = Query("000001.SH", description="基准指数, 默认上证指数"),
+    symbol: str = Query("000001.SH", description="基准指数"),
     start: str | None = Query(None),
     end: str | None = Query(None),
 ):
@@ -438,17 +558,16 @@ _ANALYZE_SYSTEM_PROMPT = """你是一位专业的个人投资组合顾问,擅长
 
 
 @router.post("/analyze")
-async def analyze_holdings(request: Request):
+async def analyze_holdings(request: Request, account: str | None = Query(None)):
     """AI 组合体检报告 (SSE 流式, 同个股分析协议: meta/delta/done)。"""
     import json as _json
 
-    repo = request.app.state.repo
-    summary_data = summary(request)
-    rows = holdings_service.list_all()
-    enriched = _enrich_rows(request, rows)
+    summary_data = summary(request, account)
+    rows = holdings_service.list_all(_acc(request, account))
+    enriched = _enrich_rows(request, rows, _rates())
 
-    # 近 30 日各持仓涨跌幅概览 (风险判断用)
     risk_brief = []
+    repo = request.app.state.repo
     for r in enriched:
         try:
             df = repo.get_daily_batch(
@@ -474,7 +593,7 @@ async def analyze_holdings(request: Request):
             risk_brief.append({k: r.get(k) for k in ("symbol", "qty", "avg_cost", "price", "market_value", "float_pnl")})
 
     user_prompt = (
-        f"组合汇总: 初始本金 {summary_data['initial_cap']}, 现金 {round(summary_data['cash'],2)}, "
+        f"组合汇总: 初始本金 {summary_data['initial_cap']}, 出金 {summary_data.get('withdrawals', 0)}, 现金 {round(summary_data['cash'],2)}, "
         f"总资产 {round(summary_data['total_asset'],2)}, 仓位 {round((summary_data['position_pct'] or 0)*100,1)}%, "
         f"浮动盈亏 {round(summary_data['float_pnl'],2)}, 已实现盈亏 {round(summary_data['realized_pnl'],2)}, "
         f"当日盈亏 {round(summary_data['day_pnl'],2)}, 持仓数 {summary_data['positions']}\n"
@@ -483,15 +602,12 @@ async def analyze_holdings(request: Request):
     )
 
     async def stream_gen():
-        import re as _re
-
         from app.services.ai_provider import stream_ai_text
 
         yield _json.dumps({
             "type": "meta",
             "summary": f"总资产 {round(summary_data['total_asset'],2)} · 仓位 {round((summary_data['position_pct'] or 0)*100,1)}% · 持仓 {summary_data['positions']} 只",
         }, ensure_ascii=False) + "\n"
-        # 剥离 reasoning 模型的 <think> 推理段: 命中未闭合前 hold 住输出
         buf = ""
         think_open = False
         try:
@@ -509,11 +625,6 @@ async def analyze_holdings(request: Request):
                         buf = buf.split("</think>", 1)[1]
                         think_open = False
                     else:
-                        # 仍在思考段; 保留可能被截断的闭合标签前缀
-                        keep = buf[-8:]
-                        buf = ""
-                        if "</think" .startswith(keep.strip()) and keep.strip():
-                            buf = keep
                         continue
                 elif buf.lstrip().startswith("<think"):
                     think_open = True
@@ -532,8 +643,6 @@ async def analyze_holdings(request: Request):
             yield _json.dumps({"type": "done"}, ensure_ascii=False) + "\n"
         except Exception as e:  # noqa: BLE001
             yield _json.dumps({"type": "error", "message": f"AI 分析失败: {e}"}, ensure_ascii=False) + "\n"
-
-    from fastapi.responses import StreamingResponse
 
     return StreamingResponse(
         stream_gen(),

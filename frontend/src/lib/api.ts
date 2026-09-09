@@ -293,7 +293,10 @@ export interface HoldingRow {
 }
 
 export interface HoldingsSummary {
+  account: string
   initial_cap: number
+  withdrawals: number
+  cum_pnl: number | null
   cash: number
   total_market_value: number
   total_asset: number
@@ -1469,11 +1472,12 @@ export const api = {
     request<{ photos: { name: string; source: string; date: string; url: string }[] }>(`/api/watchlist/recent-photos?limit=${limit}`),
 
   // ---------------- 我的持仓 ----------------
-  holdingsList: (includeClosed = false) =>
-    request<{ rows: HoldingRow[] }>(
-      includeClosed ? '/api/holdings?include_closed=true' : '/api/holdings',
+  holdingsList: (includeClosed = false, account?: string) =>
+    request<{ rows: HoldingRow[]; account: string }>(
+      `/api/holdings?${includeClosed ? 'include_closed=true&' : ''}${account ? `account=${encodeURIComponent(account)}` : ''}`,
     ),
-  holdingsSummary: () => request<HoldingsSummary>('/api/holdings/summary'),
+  holdingsSummary: (account?: string) =>
+    request<HoldingsSummary>(`/api/holdings/summary${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsUpsert: (symbol: string, body: { qty: number; available?: number; avg_cost?: number }) =>
     request<{ rows: HoldingRow[] }>(`/api/holdings/${encodeURIComponent(symbol)}`, {
       method: 'PUT',
@@ -1486,10 +1490,31 @@ export const api = {
     ),
   holdingsRemove: (symbol: string) =>
     request<{ rows: HoldingRow[] }>(`/api/holdings/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
-  holdingsPortfolio: (body: { initial_cap?: number; cash?: number }) =>
-    request<{ initial_cap: number; cash: number; updated_at: string | null }>(
+  holdingsPortfolio: (body: { initial_cap?: number; cash?: number; withdrawals?: number }) =>
+    request<{ initial_cap: number; cash: number; withdrawals: number; updated_at: string | null }>(
       '/api/holdings/portfolio',
       { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  // ---- 多账户 ----
+  holdingsAccounts: () =>
+    request<{ accounts: { id: string; name: string; created_at: string }[]; active: string }>('/api/holdings/accounts'),
+  holdingsCreateAccount: (name: string) =>
+    request<{ id: string; name: string }>('/api/holdings/accounts', { method: 'POST', body: JSON.stringify({ name }) }),
+  holdingsSetActiveAccount: (account: string) =>
+    request('/api/holdings/accounts/active', { method: 'PUT', body: JSON.stringify({ account }) }),
+  holdingsDeleteAccount: (id: string) =>
+    request(`/api/holdings/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // ---- 设置 ----
+  holdingsSettings: () =>
+    request<{ hk_rate: number; us_rate: number; hk_deposit_rate: number; benchmark: string; snapshot_keep: number }>('/api/holdings/settings'),
+  holdingsUpdateSettings: (body: { hk_rate?: number; us_rate?: number; hk_deposit_rate?: number; benchmark?: string; snapshot_keep?: number }) =>
+    request<{ hk_rate: number; us_rate: number; hk_deposit_rate: number; benchmark: string; snapshot_keep: number }>(
+      '/api/holdings/settings', { method: 'PUT', body: JSON.stringify(body) },
+    ),
+  holdingsReset: (account: string, includePortfolio = true) =>
+    request<{ account: string; removed: number }>(
+      `/api/holdings/reset?account=${encodeURIComponent(account)}&include_portfolio=${includePortfolio}`,
+      { method: 'POST' },
     ),
   holdingsImport: (items: { symbol: string; qty: number; available?: number; cost?: number }[], date?: string, cash?: number) =>
     request<{ imported: number; date: string; snapshot: boolean }>('/api/holdings/import', {
@@ -1534,9 +1559,9 @@ export const api = {
       try { yield JSON.parse(buf.trim()) } catch { /* ignore */ }
     }
   },
-  holdingsPnl: (start?: string, end?: string) =>
+  holdingsPnl: (start?: string, end?: string, account?: string) =>
     request<HoldingsPnl>(
-      `/api/holdings/pnl${start ? `?start=${start}` : ''}${end ? `${start ? '&' : '?'}end=${end}` : ''}`,
+      `/api/holdings/pnl?${[start ? `start=${start}` : '', end ? `end=${end}` : '', account ? `account=${encodeURIComponent(account)}` : ''].filter(Boolean).join('&')}`,
     ),
   holdingsBenchmark: (start?: string, symbol = '000001.SH') =>
     request<{ symbol: string; name?: string; dates: string[]; closes: number[] }>(
