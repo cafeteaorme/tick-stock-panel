@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import socket
+import threading
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -112,6 +113,35 @@ def probe_endpoints(cookie: str) -> tuple[str | None, str]:
     return None, "未探测到可用数据接口 (可能需要配合浏览器抓包更新端点列表)"
 
 
+_SYNC_INTERVAL_S = 3600  # 每小时
+_sync_thread: threading.Thread | None = None
+_sync_stop = threading.Event()
+
+
+def start_background_sync() -> bool:
+    """每小时后台同步一次 (仅配置了 Cookie 时真正拉取)。幂等。"""
+    global _sync_thread
+    if _sync_thread is not None and _sync_thread.is_alive():
+        return False
+    _sync_stop.clear()
+
+    def _loop() -> None:
+        while not _sync_stop.wait(_SYNC_INTERVAL_S):
+            try:
+                cfg = load_config()
+                if not (cfg.get("cookie") or "").strip():
+                    continue  # 未配置, 静默跳过
+                res = sync()
+                logger.info("tzzb hourly sync: %s", res.get("message", "")[:120])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("tzzb hourly sync error: %s", e)
+
+    _sync_thread = threading.Thread(target=_loop, daemon=True, name="tzzb-hourly-sync")
+    _sync_thread.start()
+    logger.info("tzzb hourly sync started (interval %ss)", _SYNC_INTERVAL_S)
+    return True
+
+
 def sync(account_id: str | None = None) -> dict[str, Any]:
     """执行同步: 探测接口 → 拉账户名/持仓 → 写入本地账户。
 
@@ -137,7 +167,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
         body = probe_body
         if not endpoint:
             save_config(last_sync=datetime.utcnow().isoformat(timespec="seconds"),
-                        last_result="未探测到可用接口")
+                        last_result="未探测到可用接口", last_ok=False)
             return {"ok": False, "message": "同步失败：未探测到投资账本数据接口（页面为登录制且无公开 API）。请配合浏览器抓包提供接口路径，或继续使用截图导入"}
         save_config(endpoint=endpoint)
 
@@ -171,7 +201,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
 
     save_config(last_sync=datetime.utcnow().isoformat(timespec="seconds"),
                 user_name=user_name,
-                last_result=f"接口 {endpoint} · 解析 {len(rows)} 条持仓")
+                last_result=f"接口 {endpoint} · 解析 {len(rows)} 条持仓", last_ok=True)
     return {
         "ok": True,
         "message": f"同步成功：接口 {endpoint}，账户「{user_name or '未知名'}」，解析 {len(rows)} 条持仓记录",

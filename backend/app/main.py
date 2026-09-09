@@ -147,6 +147,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         logger.warning("hk_us_intraday refresh start failed: %s", e)
 
+    # 投资账本每小时后台同步 (未配置 Cookie 时静默跳过)
+    try:
+        from app.services import tzzb
+        tzzb.start_background_sync()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("tzzb sync start failed: %s", e)
+
     # 策略引擎
     from app.strategy.engine import StrategyEngine
     from app.strategy.monitor import StrategyMonitorService

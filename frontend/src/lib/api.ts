@@ -1505,7 +1505,7 @@ export const api = {
   holdingsAccounts: () =>
     request<{ accounts: (AccountInfo & { day_pnl?: number; day_pnl_pct?: number | null; positions?: number })[]; active: string }>('/api/holdings/accounts'),
   holdingsTzzbStatus: () =>
-    request<{ cookie_set: boolean; endpoint?: string; user_name?: string; last_sync?: string | null; last_result?: string }>('/api/holdings/tzzb/status'),
+    request<{ cookie_set: boolean; endpoint?: string; user_name?: string; last_sync?: string | null; last_result?: string; last_ok?: boolean }>('/api/holdings/tzzb/status'),
   holdingsTzzbSetCookie: (cookie: string) =>
     request<{ ok: boolean }>('/api/holdings/tzzb/cookie', { method: 'PUT', body: JSON.stringify({ cookie }) }),
   holdingsTzzbSync: (account?: string) =>

@@ -363,6 +363,7 @@ def tzzb_status():
         "user_name": cfg.get("user_name"),
         "last_sync": cfg.get("last_sync"),
         "last_result": cfg.get("last_result"),
+        "last_ok": bool(cfg.get("last_ok")),
     }
 
 

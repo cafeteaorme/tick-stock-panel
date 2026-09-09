@@ -1309,6 +1309,11 @@ export function Holdings() {
 
   // 投资账本同步 (导入 + 刷新共用; 成功/失败都 toast)
   const [tzzbSyncing, setTzzbSyncing] = useState(false)
+  const tzzbStatus = useQuery({
+    queryKey: ['holdings-tzzb-status'],
+    queryFn: api.holdingsTzzbStatus,
+    refetchInterval: 60_000,
+  })
   const runTzzbSync = async (isRefresh = false) => {
     setTzzbSyncing(true)
     try {
@@ -1324,6 +1329,7 @@ export function Holdings() {
       const res = await api.holdingsTzzbSync(activeAcc || undefined)
       refreshAll()
       qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+      qc.invalidateQueries({ queryKey: ['holdings-tzzb-status'] })
       if (res.ok) toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
       else toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
     } catch (e) {
@@ -1408,6 +1414,19 @@ export function Holdings() {
         <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated" title="持仓设置">
           <SettingsIcon className="h-4 w-4" />
         </button>
+        {tzzbStatus.data && (tzzbStatus.data.last_ok ? (
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted tabular-nums" title={`投资账本数据更新于 ${tzzbStatus.data.last_sync}`}>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            数据 {tzzbStatus.data.last_sync?.slice(11, 16)}
+          </span>
+        ) : (
+          <button onClick={() => void runTzzbSync()} disabled={tzzbSyncing}
+            className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:underline disabled:opacity-40"
+            title={tzzbStatus.data.last_result || '投资账本数据尚未获取成功'}>
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            重新导入投资账本数据
+          </button>
+        ))}
         <button
           onClick={() => void runTzzbSync()}
           disabled={tzzbSyncing}
