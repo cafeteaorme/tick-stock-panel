@@ -249,6 +249,17 @@ export interface WatchlistImportCandidate {
   available?: number | null
   /** stockocr 本地扫描交叉验证: true 通过 / false 未匹配 / null 不可验证 */
   verified?: boolean | null
+  /** 投资账本富字段 */
+  hold_days?: number | null
+  position_rate?: number | null
+  pre_profit?: number | null
+  pre_rate?: number | null
+  hold_profit?: number | null
+  hold_rate?: number | null
+  m1_rate?: number | null
+  m3_rate?: number | null
+  m6_rate?: number | null
+  m12_rate?: number | null
   /** 成本价 */
   cost?: number | null
 }
@@ -290,6 +301,17 @@ export interface HoldingRow {
   float_pnl?: number | null
   float_pnl_pct?: number | null
   day_pnl?: number | null
+  /** 投资账本富字段 */
+  hold_days?: number | null
+  position_rate?: number | null
+  pre_profit?: number | null
+  pre_rate?: number | null
+  hold_profit?: number | null
+  hold_rate?: number | null
+  m1_rate?: number | null
+  m3_rate?: number | null
+  m6_rate?: number | null
+  m12_rate?: number | null
 }
 
 export interface AccountInfo {
@@ -1494,8 +1516,8 @@ export const api = {
       `/api/holdings/${encodeURIComponent(symbol)}/sell`,
       { method: 'POST', body: JSON.stringify({ price, qty }) },
     ),
-  holdingsRemove: (symbol: string) =>
-    request<{ rows: HoldingRow[] }>(`/api/holdings/${encodeURIComponent(symbol)}`, { method: 'DELETE' }),
+  holdingsRemove: (symbol: string, account?: string) =>
+    request<{ rows: HoldingRow[] }>(`/api/holdings/${encodeURIComponent(symbol)}${account ? `?account=${encodeURIComponent(account)}` : ''}`, { method: 'DELETE' }),
   holdingsPortfolio: (body: { initial_cap?: number; cash?: number; withdrawals?: number }) =>
     request<{ initial_cap: number; cash: number; withdrawals: number; updated_at: string | null }>(
       '/api/holdings/portfolio',

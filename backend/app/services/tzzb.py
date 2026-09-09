@@ -312,6 +312,11 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
         positions = pos_raw.get("position") or []
         cash = float(pos_raw.get("money_remain") or 0)
 
+        def _f(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
         holdings_rows = []
         for p in positions:
             code = str(p.get("code") or "").strip()
@@ -321,7 +326,20 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
             symbol = code + _market_suffix(market, code)
             qty = float(p.get("count") or 0)
             cost = float(p.get("cost") or 0)
-            holdings_svc.upsert(acc_id, symbol, qty, qty, cost)
+            extras = {
+                "price": _f(p.get("price")),
+                "hold_days": _f(p.get("hold_days")),
+                "position_rate": _f(p.get("position_rate")),
+                "pre_profit": _f(p.get("pre_profit")),
+                "pre_rate": _f(p.get("pre_rate")),
+                "hold_profit": _f(p.get("hold_profit")),
+                "hold_rate": _f(p.get("hold_rate")),
+                "m1_rate": _f(p.get("m1_rate")),
+                "m3_rate": _f(p.get("m3_rate")),
+                "m6_rate": _f(p.get("m6_rate")),
+                "m12_rate": _f(p.get("m12_rate")),
+            }
+            holdings_svc.upsert(acc_id, symbol, qty, qty, cost, extras)
             if symbol not in {r["symbol"] for r in wl.list_symbols()}:
                 wl.add(symbol)
             holdings_rows.append({"symbol": symbol, "qty": qty, "available": qty,

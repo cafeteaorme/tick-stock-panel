@@ -32,6 +32,18 @@ _SCHEMA = {
     "status": pl.Utf8,
     "closed_at": pl.Utf8,
     "realized_pnl": pl.Float64,
+    # 投资账本同步的富字段
+    "price": pl.Float64,
+    "hold_days": pl.Float64,
+    "position_rate": pl.Float64,
+    "pre_profit": pl.Float64,
+    "pre_rate": pl.Float64,
+    "hold_profit": pl.Float64,
+    "hold_rate": pl.Float64,
+    "m1_rate": pl.Float64,
+    "m3_rate": pl.Float64,
+    "m6_rate": pl.Float64,
+    "m12_rate": pl.Float64,
 }
 
 DEFAULT_ACCOUNT = "default"
@@ -191,7 +203,8 @@ def get(account_id: str, symbol: str) -> dict[str, Any] | None:
 
 
 def upsert(account_id: str, symbol: str, qty: float,
-           available: float | None = None, avg_cost: float | None = None) -> list[dict]:
+           available: float | None = None, avg_cost: float | None = None,
+           extras: dict | None = None) -> list[dict]:
     df = _read(account_id)
     df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
     row = {
@@ -204,6 +217,9 @@ def upsert(account_id: str, symbol: str, qty: float,
         "closed_at": None,
         "realized_pnl": None,
     }
+    for k, v in (extras or {}).items():
+        if k in _SCHEMA and k not in row:
+            row[k] = v
     out = pl.concat([pl.DataFrame([row], schema=_SCHEMA), df], how="diagonal_relaxed")
     _write(account_id, out)
     return list_all(account_id)

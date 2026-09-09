@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BookMarked, Briefcase, CalendarDays, Camera, Check, ChevronDown, ExternalLink, Loader2, Pencil, PieChart as PieIcon,
-  Plus, RefreshCw, Settings as SettingsIcon, Sparkles, TrendingUp, Trash2, Wallet, X,
+  Plus, RefreshCw, Settings as SettingsIcon, Sparkles, TrendingUp, Trash2, X,
 } from 'lucide-react'
 import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
@@ -81,39 +81,57 @@ function Sparkline({ values }: { values: number[] }) {
  * 汇总卡 (字体放大 + 金额/百分比红绿)
  * ================================================================ */
 
-function SummaryCard({ s, spark, onEditPortfolio }: { s: HoldingsSummary; spark: number[]; onEditPortfolio: () => void }) {
+function SummaryCard({ s, spark, onSetCap }: {
+  s: HoldingsSummary
+  spark: number[]
+  onSetCap: (v: number) => void
+}) {
+  const [editingCap, setEditingCap] = useState(false)
+  const [capInput, setCapInput] = useState('')
+  const saveCap = () => {
+    if (Number(capInput) > 0) onSetCap(Number(capInput))
+    setEditingCap(false)
+  }
   return (
     <div className="rounded-card border border-border bg-surface p-5 md:p-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-xs text-muted">总资产{ s.initial_cap ? <span className="ml-1">（本金 {fmtMoney(s.initial_cap, 0)}{s.withdrawals ? ` · 出金 ${fmtMoney(s.withdrawals, 0)}` : ''}）</span> : null }</div>
+          <div className="text-xs text-muted">总资产</div>
           <div className="text-3xl md:text-4xl font-bold text-foreground tabular-nums mt-1.5 tracking-tight">{fmtMoney(s.total_asset)}</div>
         </div>
         <div className="md:ml-10">
-          <div className="text-xs text-muted">累计盈亏<span className="ml-1">（本金-出金-总资产）</span></div>
-          <div className={`text-2xl md:text-3xl font-bold tabular-nums mt-1.5 tracking-tight ${pnlColor(s.cum_pnl)}`}>
-            {fmtMoney(s.cum_pnl)}
+          <div className="text-xs text-muted">累计盈亏<span className="ml-1">（本金-总资产）</span></div>
+          {editingCap ? (
+            <div className="flex items-center gap-1.5 mt-1">
+              <input autoFocus type="number" step="any" value={capInput} onChange={e => setCapInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveCap()}
+                placeholder="输入本金"
+                className="w-32 h-9 px-2.5 rounded-btn bg-base border border-accent/60 tabular-nums text-foreground focus:outline-none" />
+              <button onClick={saveCap} className="h-9 px-3 rounded-btn bg-accent text-white text-xs">保存</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setCapInput(s.initial_cap ? String(s.initial_cap) : ''); setEditingCap(true) }}
+              className={`text-2xl md:text-3xl font-bold tabular-nums mt-1.5 tracking-tight text-left group/cap flex items-center gap-2 ${pnlColor(s.cum_pnl)}`}
+              title="点击设置该账户的初始本金"
+            >
+              {s.cum_pnl != null ? fmtMoney(s.cum_pnl) : <span className="text-sm text-muted font-normal">设置本金</span>}
+              <Pencil className="h-3.5 w-3.5 opacity-40 group-hover/cap:opacity-100" />
+            </button>
+          )}
+          <div className="text-xs tabular-nums text-muted mt-0.5">
+            本金 {fmtMoney(s.initial_cap, 0)}
+            {s.total_asset != null && s.cum_pnl != null && (
+              <span className={`ml-2 ${pnlColor(s.cum_pnl / s.total_asset)}`}>{fmtPnlPct(s.cum_pnl / s.total_asset)}</span>
+            )}
           </div>
-          {s.cum_pnl != null && s.initial_cap - s.withdrawals > 0 && (
-            <div className="text-xs tabular-nums text-muted mt-0.5">
-              累计收益率 {fmtPnlPct(s.cum_pnl / (s.initial_cap - s.withdrawals))}
-            </div>
-          )}
         </div>
-        <div className="flex items-center gap-3">
-          {spark.length >= 2 && (
-            <div className="text-right">
-              <div className="text-[10px] text-muted mb-0.5">近30日</div>
-              <Sparkline values={spark} />
-            </div>
-          )}
-          <button
-            onClick={onEditPortfolio}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground transition-colors"
-          >
-            <Wallet className="h-3.5 w-3.5" />资金设置
-          </button>
-        </div>
+        {spark.length >= 2 && (
+          <div className="text-right md:ml-auto">
+            <div className="text-[10px] text-muted mb-0.5">近30日</div>
+            <Sparkline values={spark} />
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
         <div>
@@ -122,7 +140,7 @@ function SummaryCard({ s, spark, onEditPortfolio }: { s: HoldingsSummary; spark:
           <div className={`text-sm tabular-nums ${pnlColor(s.day_pnl_pct)}`}>{fmtPct(s.day_pnl_pct)}</div>
         </div>
         <div>
-          <div className="text-xs text-muted">总盈亏（浮+已实现）</div>
+          <div className="text-xs text-muted">账本总盈亏（浮+已实现）</div>
           <div className={`text-lg font-bold tabular-nums mt-1 ${pnlColor(s.total_pnl)}`}>{fmtMoney(s.total_pnl)}</div>
           <div className={`text-sm tabular-nums ${pnlColor(s.total_pnl_pct)}`}>{fmtPct(s.total_pnl_pct)}</div>
         </div>
@@ -430,49 +448,6 @@ function EditDialog({ row, onClose }: { row: HoldingRow; onClose: () => void }) 
             </button>
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-function PortfolioDialog({ initial, cash, withdrawals, onClose }: { initial: number; cash: number; withdrawals: number; onClose: () => void }) {
-  const qc = useQueryClient()
-  const [cap, setCap] = useState(initial ? String(initial) : '')
-  const [c, setC] = useState(String(cash))
-  const [w, setW] = useState(withdrawals ? String(withdrawals) : '')
-  const save = useMutation({
-    mutationFn: () => api.holdingsPortfolio({
-      initial_cap: cap ? Number(cap) : undefined,
-      cash: Number(c) || 0,
-      withdrawals: w ? Number(w) : 0,
-    }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: QK.holdingsSummary })
-      qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
-      toast('资金已更新', 'success')
-      onClose()
-    },
-  })
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative rounded-card border border-border bg-surface shadow-2xl px-5 py-4 w-[23rem] max-w-[92vw] space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-foreground">资金设置</div>
-          <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
-        </div>
-        {([['初始本金（计算总盈亏%）', cap, setCap], ['当前可用资金（现金）', c, setC], ['累计出金', w, setW]] as const).map(([label, v, set]) => (
-          <label key={label} className="flex flex-col gap-1.5 text-xs">
-            <span className="text-secondary">{label}</span>
-            <input type="number" step="any" value={v} onChange={e => set(e.target.value)}
-              className="h-9 px-2.5 rounded-btn bg-base border border-border tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
-          </label>
-        ))}
-        <div className="text-[11px] text-muted">总资产 = 可用资金 + 持仓市值；日/月/年收益 = 总资产逐日变化。</div>
-        <button onClick={() => save.mutate()} disabled={save.isPending}
-          className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
-          {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}保存
-        </button>
       </div>
     </div>
   )
@@ -1315,13 +1290,13 @@ function AiReportPanel({ onClose }: { onClose: () => void }) {
  * ================================================================ */
 
 type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_value' | 'float_pnl' | 'day_pnl'
+  | 'pre_profit' | 'hold_days' | 'm1_rate' | 'm3_rate' | 'm6_rate' | 'm12_rate' | 'position_rate'
 
 export function Holdings() {
   const qc = useQueryClient()
   const [tab, setTab] = useState<'day' | 'month' | 'year'>('day')
   const [year, setYear] = useState(new Date().getFullYear())
   const [editing, setEditing] = useState<HoldingRow | null>(null)
-  const [showPortfolio, setShowPortfolio] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -1338,7 +1313,10 @@ export function Holdings() {
   const [activeAcc, setActiveAcc] = useState<string>('')
   const accounts = accountsQ.data?.accounts ?? []
   useEffect(() => {
-    if (!activeAcc && accountsQ.data?.active) setActiveAcc(accountsQ.data.active)
+    const d = accountsQ.data
+    if (!d) return
+    const ids = new Set(d.accounts.map(a => a.id))
+    if (!activeAcc || !ids.has(activeAcc)) setActiveAcc(d.active)
   }, [accountsQ.data, activeAcc])
 
   const holdings = useQuery({
@@ -1375,6 +1353,13 @@ export function Holdings() {
         case 'market_value': return r.market_value ?? -Infinity
         case 'float_pnl': return r.float_pnl ?? -Infinity
         case 'day_pnl': return r.day_pnl ?? -Infinity
+        case 'pre_profit': return r.pre_profit ?? -Infinity
+        case 'hold_days': return r.hold_days ?? -Infinity
+        case 'm1_rate': return r.m1_rate ?? -Infinity
+        case 'm3_rate': return r.m3_rate ?? -Infinity
+        case 'm6_rate': return r.m6_rate ?? -Infinity
+        case 'm12_rate': return r.m12_rate ?? -Infinity
+        case 'position_rate': return r.position_rate ?? -Infinity
       }
     }
     list.sort((a, b) => {
@@ -1392,10 +1377,11 @@ export function Holdings() {
     qc.invalidateQueries({ queryKey: QK.holdings })
     qc.invalidateQueries({ queryKey: QK.holdingsSummary })
     qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
+    qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
   }
 
   const remove = useMutation({
-    mutationFn: (symbol: string) => api.holdingsRemove(symbol),
+    mutationFn: (symbol: string) => api.holdingsRemove(symbol, activeAcc || undefined),
     onSuccess: () => { refreshAll(); qc.invalidateQueries({ queryKey: ['watchlist-enriched'] }); toast('已删除持仓记录', 'success') },
   })
 
@@ -1412,6 +1398,13 @@ export function Holdings() {
     { key: 'market_value', label: '市值' },
     { key: 'float_pnl', label: '浮动盈亏' },
     { key: 'day_pnl', label: '当日盈亏' },
+    { key: 'pre_profit', label: '当日参考' },
+    { key: 'hold_days', label: '持有天数' },
+    { key: 'm1_rate', label: '近1月' },
+    { key: 'm3_rate', label: '近3月' },
+    { key: 'm6_rate', label: '近6月' },
+    { key: 'm12_rate', label: '近12月' },
+    { key: 'position_rate', label: '占比' },
   ]
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
@@ -1500,7 +1493,11 @@ export function Holdings() {
             const active = a.id === activeAcc
             return (
               <button key={a.id}
-                onClick={() => { setActiveAcc(a.id); refreshAll() }}
+                onClick={() => {
+                  setActiveAcc(a.id)
+                  api.holdingsSetActiveAccount(a.id).catch(() => {})
+                  refreshAll()
+                }}
                 className={`px-2.5 py-1 rounded-[6px] text-xs transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
                 title={`${a.name} · ${a.positions ?? 0} 只持仓`}>
                 {a.name}
@@ -1567,7 +1564,13 @@ export function Holdings() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
-        {s && <SummaryCard s={s} spark={spark} onEditPortfolio={() => setShowPortfolio(true)} />}
+        {s && <SummaryCard s={s} spark={spark} onSetCap={(v) => {
+          api.holdingsPortfolio({ initial_cap: v }).then(() => {
+            qc.invalidateQueries({ queryKey: QK.holdingsSummary })
+            qc.invalidateQueries({ queryKey: QK.holdingsPnl() })
+            toast('本金已保存', 'success')
+          }).catch(() => toast('保存失败', 'error'))
+        }} />}
 
         {showAi && <AiReportPanel key={aiKey} onClose={() => setShowAi(false)} />}
 
@@ -1614,6 +1617,13 @@ export function Holdings() {
                         {fmtMoney(r.float_pnl)}<span className="text-[11px] font-normal ml-1">{fmtPct(r.float_pnl_pct)}</span>
                       </td>
                       <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{fmtMoney(r.day_pnl)}</td>
+                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.pre_profit)}`}>{fmtMoney(r.pre_profit)}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.hold_days != null ? Math.round(r.hold_days) : '—'}</td>
+                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m1_rate)}`}>{fmtPct(r.m1_rate)}</td>
+                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>
+                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>
+                      <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <button onClick={() => setEditing(r)} className="p-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated" title="编辑/卖出"><Pencil className="h-3.5 w-3.5" /></button>
@@ -1624,7 +1634,7 @@ export function Holdings() {
                   )
                 })}
                 {rows.length === 0 && (
-                  <tr><td colSpan={9} className="px-3 py-12 text-center">
+                  <tr><td colSpan={15} className="px-3 py-12 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <div className="text-sm text-foreground font-medium">暂无当日持仓</div>
                       <div className="text-xs text-muted leading-relaxed">
@@ -1713,7 +1723,7 @@ export function Holdings() {
       </div>
 
       {editing && <EditDialog row={editing} onClose={() => setEditing(null)} />}
-      {showPortfolio && s && <PortfolioDialog initial={s.initial_cap} cash={s.cash} withdrawals={s.withdrawals} onClose={() => setShowPortfolio(false)} />}
+
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}
       {showSettings && summary?.data && (
         <HoldingsSettingsDialog

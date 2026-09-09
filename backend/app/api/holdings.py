@@ -236,8 +236,8 @@ def summary(request: Request, account: str | None = Query(None)):
         "realized_pnl": realized,
         "total_pnl": float_pnl + realized,
         "total_pnl_pct": ((float_pnl + realized) / initial) if initial else None,
-        # 累计盈亏 = 本金 - 出金 - 总资产 (含浮动+已实现的总口径)
-        "cum_pnl": (initial - withdrawals - total_asset) if (initial or withdrawals) else None,
+        # 累计盈亏 = 初始本金 - 当前总资产 (出金仅作记录, 不参与计算)
+        "cum_pnl": (initial - total_asset) if initial else None,
         "day_pnl": day_pnl,
         "day_pnl_pct": (day_pnl / (total_asset - day_pnl)) if (total_asset - day_pnl) else None,
         "positions": len(enriched),
