@@ -1354,7 +1354,7 @@ export function Holdings() {
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [showClosed, setShowClosed] = useState(false)
+  const [showClosed, setShowClosed] = useState(true)
   const [dayDetail, setDayDetail] = useState<string | null>(null)
   const [showAi, setShowAi] = useState(false)
   const [aiKey, setAiKey] = useState(0)
@@ -1424,6 +1424,7 @@ export function Holdings() {
     enabled: !!activeAcc,
   })
   const closedRows = (closedQ.data?.rows ?? []).filter(r => r.status === 'closed')
+  const closedRealized = closedRows.reduce((sum, r) => sum + (r.realized_pnl ?? 0), 0)
   const summary = useQuery({
     queryKey: [...QK.holdingsSummary, activeAcc], queryFn: () => api.holdingsSummary(activeAcc || undefined),
     enabled: !!activeAcc,
@@ -1687,6 +1688,14 @@ export function Holdings() {
 
         {showAi && <AiReportPanel key={aiKey} onClose={() => setShowAi(false)} />}
 
+        {(() => {
+          const c = rows.find(r => (r.position_rate ?? 0) > 0.4)
+          return c ? (
+            <div className="rounded-btn border border-amber-400/30 bg-amber-400/5 px-3 py-2 text-xs text-amber-400">
+              ⚠ 持仓集中度提醒：{c.name || c.symbol} 占账户 {((c.position_rate ?? 0) * 100).toFixed(0)}%，建议关注分散风险
+            </div>
+          ) : null
+        })()}
         {/* 持仓明细 (可排序 + 点击查看) */}
         <div className="rounded-card border border-border bg-surface overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2 relative">
@@ -1739,8 +1748,9 @@ export function Holdings() {
                 )}
                 {rows.map(r => {
                   const badge = REGION_BADGE[r.region ?? 'CN']
+                  const concentrated = (r.position_rate ?? 0) > 0.4
                   return (
-                    <tr key={r.symbol} className="border-b border-border/40 hover:bg-elevated/30 transition-colors cursor-pointer"
+                    <tr key={r.symbol} className={`border-b border-border/40 hover:bg-elevated/30 transition-colors cursor-pointer ${concentrated ? 'bg-amber-400/[0.07]' : ''}`}
                       onClick={() => openPreview(r.symbol, r.name || '')}>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-1.5">
@@ -1808,6 +1818,7 @@ export function Holdings() {
             <div className="px-4 py-3 border-b border-border flex items-center gap-2">
               <span className="text-sm font-semibold text-foreground">已清仓明细</span>
               <span className="text-xs text-muted">{closedRows.length} 只</span>
+              <span className={`text-xs tabular-nums font-medium ${pnlColor(closedRealized)}`}>已实现合计 {fmtMoney(closedRealized)}</span>
               <button onClick={() => setShowClosed(v => !v)} className="ml-auto text-[11px] text-accent hover:underline">
                 {showClosed ? '收起' : '展开'}
               </button>
@@ -1824,8 +1835,14 @@ export function Holdings() {
                   </thead>
                   <tbody>
                     {closedRows.map(r => (
-                      <tr key={r.symbol} className="border-b border-border/40">
-                        <td className="px-3 py-2 text-foreground">{r.name || r.symbol}<span className="font-mono text-muted text-xs ml-1.5">{r.symbol}</span></td>
+                      <tr key={r.symbol} className="border-b border-border/40 cursor-pointer hover:bg-elevated/30"
+                        onClick={() => openPreview(r.symbol, r.name || '')}>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-foreground font-medium whitespace-nowrap">{r.name || '—'}</span>
+                            <span className="font-mono text-muted text-xs shrink-0">{r.symbol}</span>
+                          </div>
+                        </td>
                         <td className="px-3 py-2 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
                         <td className={`px-3 py-2 tabular-nums font-medium ${pnlColor(r.realized_pnl)}`}>{fmtMoney(r.realized_pnl)}</td>
                         <td className="px-3 py-2 tabular-nums text-muted text-xs">{r.closed_at?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
@@ -1905,13 +1922,25 @@ export function Holdings() {
         <div className="rounded-card border border-border bg-surface p-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-semibold text-foreground">年收益</span>
-            {(() => {
-              const ledger = historyData.data?.yearly?.find(yy => yy.period === String(year))
-              const v = ledger ? ledger.pnl : yearPnl
-              return v != null ? (
-                <span className={`text-sm tabular-nums font-medium ${pnlColor(v)}`}>{fmtMoney(v)}{ledger ? '（账本）' : ''}</span>
-              ) : null
-            })()}
+            <div className="flex items-center gap-3">
+              {(() => {
+                const assets = (pnl.data?.daily ?? []).map(r => r.asset)
+                let peak = -Infinity, maxDD = 0
+                for (const a of assets) { if (a > peak) peak = a; if (peak > 0 && a < peak) maxDD = Math.max(maxDD, (peak - a) / peak) }
+                return maxDD > 0 ? (
+                  <span className="text-xs tabular-nums text-muted" title="期间最大回撤">
+                    最大回撤 {(maxDD * 100).toFixed(1)}%
+                  </span>
+                ) : null
+              })()}
+              {(() => {
+                const ledger = historyData.data?.yearly?.find(yy => yy.period === String(year))
+                const v = ledger ? ledger.pnl : yearPnl
+                return v != null ? (
+                  <span className={`text-sm tabular-nums font-medium ${pnlColor(v)}`}>{fmtMoney(v)}{ledger ? '（账本）' : ''}</span>
+                ) : null
+              })()}
+            </div>
           </div>
           <AssetCurve daily={pnl.data?.daily ?? []} benchmark={benchmark.data} />
         </div>

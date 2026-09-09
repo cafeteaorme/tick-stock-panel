@@ -510,7 +510,7 @@ function buildOption(
         }
       } else {
         markPointData.push({
-          name: m.label ?? '',
+          name: m.date ?? '',
           coord: [m.date, isBuy ? d.low : d.high],
           symbol: 'arrow', symbolSize: 12,
           symbolRotate: isBuy ? 0 : 180,
