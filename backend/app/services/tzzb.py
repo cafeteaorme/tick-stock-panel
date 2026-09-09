@@ -321,6 +321,14 @@ def fetch_cookies_via_cdp() -> str:
         else:
             raise RuntimeError("无法启动 Chrome 调试端口 (若该窗口开着请先关闭后重试)")
 
+    # 无页面目标时自动新建 (专用 Chrome 窗口被关闭后的情况)
+    if not any(t.get("type") == "page" for t in _cdp_json("/json/list")):
+        import urllib.request as _ur
+
+        opener = _ur.build_opener(_ur.ProxyHandler({}))
+        req = _ur.Request(f"http://127.0.0.1:{_CDP_PORT}/json/new?about:blank", method="PUT")
+        opener.open(req, timeout=10)
+        _time.sleep(1)
     targets = _cdp_json("/json/list")
     page = next((t for t in targets if t.get("type") == "page"), None)
     if not page:
