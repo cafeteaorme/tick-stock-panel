@@ -147,10 +147,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         logger.warning("hk_us_intraday refresh start failed: %s", e)
 
-    # 投资账本每小时后台同步 (未配置 Cookie 时静默跳过)
+    # 投资账本定时同步 (交易日 9:31/16:05) + 持仓港股开市时段价格自动刷新
     try:
         from app.services import tzzb
         tzzb.start_background_sync()
+        tzzb.start_hk_price_refresh()
     except Exception as e:  # noqa: BLE001
         logger.warning("tzzb sync start failed: %s", e)
 

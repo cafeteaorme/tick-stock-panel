@@ -203,7 +203,7 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
   const [y, m] = month.split('-').map(Number)
   const first = new Date(y, m - 1, 1)
   const gridStart = new Date(first)
-  gridStart.setDate(1 - ((first.getDay() + 6) % 7))
+  gridStart.setDate(1 - first.getDay())  // 周日开头
   const cells: { date: string | null; pnl?: number }[] = []
   for (let i = 0; i < 42; i++) {
     const d = new Date(gridStart)
@@ -237,8 +237,8 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
           <button onClick={() => shiftMonth(1)} className="p-1 rounded-btn text-secondary hover:bg-elevated -rotate-90"><ChevronDown className="h-4 w-4" /></button>
         </div>
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted mb-1">
-        {['一', '二', '三', '四', '五', '六', '日'].map(d => <div key={d}>{d}</div>)}
+      <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-muted mb-1">
+        {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}
       </div>
       <div className="grid grid-cols-7 gap-1">
         {cells.map((c, i) => (
@@ -247,13 +247,15 @@ function PnlCalendar({ daily, onPickDay }: { daily: { date: string; pnl: number 
             disabled={!c.date || c.pnl == null}
             onClick={() => c.date && c.pnl != null && onPickDay(c.date)}
             title={c.date && c.pnl != null ? `${c.date} · ${fmtMoney(c.pnl)}（点击查看明细）` : ''}
-            className={`aspect-square rounded-md flex flex-col items-center justify-center text-[10px] tabular-nums transition-transform
+            className={`aspect-square rounded-md flex flex-col items-center justify-center transition-transform
               ${c.date ? bg(c.pnl) : 'opacity-0'}
-              ${c.pnl != null ? 'text-white font-medium hover:scale-105 cursor-pointer' : 'text-muted cursor-default'}`}
+              ${c.pnl != null ? 'text-white hover:scale-105 cursor-pointer' : 'text-muted cursor-default'}`}
           >
-            {c.date && <span className="opacity-70">{Number(c.date.slice(8))}</span>}
+            {c.date && <span className={`text-[10px] tabular-nums ${c.pnl != null ? 'opacity-80' : ''}`}>{Number(c.date.slice(8))}</span>}
             {c.pnl != null && Math.abs(c.pnl) >= 1 && (
-              <span className="text-[9px] leading-tight">{Math.abs(c.pnl) >= 1_0000 ? `${(c.pnl / 1_0000).toFixed(1)}万` : Math.round(c.pnl / (Math.abs(c.pnl) >= 1000 ? 1000 : 1)) + (Math.abs(c.pnl) >= 1000 ? 'k' : '')}</span>
+              <span className={`text-xs font-bold tabular-nums leading-tight ${c.pnl > 0 ? 'text-white' : 'text-white'}`}>
+                {c.pnl > 0 ? '+' : ''}{Math.abs(c.pnl) >= 1_0000 ? `${(c.pnl / 1_0000).toFixed(1)}万` : Math.abs(c.pnl) >= 1000 ? `${Math.round(c.pnl / 1000)}k` : Math.round(c.pnl)}
+              </span>
             )}
           </button>
         ))}
@@ -576,6 +578,51 @@ function ShotSummaryBlock({
   )
 }
 
+function HistoryCacheBlock() {
+  const qc = useQueryClient()
+  const status = useQuery({
+    queryKey: ['holdings-tzzb-history'],
+    queryFn: api.holdingsTzzbHistoryStatus,
+  })
+  const [fetching, setFetching] = useState(false)
+  const fetchNow = async () => {
+    setFetching(true)
+    try {
+      const res = await api.holdingsTzzbHistoryFetch()
+      toast(res.message, res.ok ? 'success' : 'error')
+      qc.invalidateQueries({ queryKey: ['holdings-tzzb-history'] })
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '拉取失败', 'error')
+    } finally {
+      setFetching(false)
+    }
+  }
+  const st = status.data
+  return (
+    <div className="pt-3 border-t border-border/60 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-medium text-secondary">历史收益缓存</div>
+        {st?.cached ? (
+          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            已缓存 {st.days} 天 · {st.date}
+          </span>
+        ) : (
+          <span className="text-[10px] text-amber-400">未缓存</span>
+        )}
+      </div>
+      <button onClick={fetchNow} disabled={fetching}
+        className="w-full h-8 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+        {fetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        一键获取全部历史收益
+      </button>
+      {st?.fetched_at && (
+        <div className="text-[10px] text-muted">上次获取：{st.fetched_at.slice(0, 16).replace('T', ' ')}</div>
+      )}
+    </div>
+  )
+}
+
 function HoldingsSettingsDialog({ accountId, onClose }: { accountId: string; onClose: () => void }) {
   const qc = useQueryClient()
   const settings = useQuery({ queryKey: ['holdings-settings'], queryFn: api.holdingsSettings })
@@ -674,6 +721,7 @@ function HoldingsSettingsDialog({ accountId, onClose }: { accountId: string; onC
             className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
             {save.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}保存设置
           </button>
+          <HistoryCacheBlock />
           <div className="pt-3 border-t border-border/60 space-y-2">
             <div className="text-[11px] font-medium text-danger/80">危险操作</div>
             {!confirmReset ? (
@@ -1327,6 +1375,7 @@ export function Holdings() {
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showClosed, setShowClosed] = useState(false)
   const [dayDetail, setDayDetail] = useState<string | null>(null)
   const [showAi, setShowAi] = useState(false)
   const [aiKey, setAiKey] = useState(0)
@@ -1360,6 +1409,12 @@ export function Holdings() {
     placeholderData: (prev) => prev,
     retry: 1,
   })
+  const closedQ = useQuery({
+    queryKey: [...QK.holdings, 'closed', activeAcc],
+    queryFn: () => api.holdingsList(true, activeAcc || undefined),
+    enabled: !!activeAcc,
+  })
+  const closedRows = (closedQ.data?.rows ?? []).filter(r => r.status === 'closed')
   const summary = useQuery({
     queryKey: [...QK.holdingsSummary, activeAcc], queryFn: () => api.holdingsSummary(activeAcc || undefined),
     enabled: !!activeAcc,
@@ -1657,7 +1712,7 @@ export function Holdings() {
                           <span className="font-mono text-muted text-xs">{r.symbol}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 tabular-nums text-foreground">{r.price?.toFixed(2) ?? '—'}</td>
+                      <td className={`px-3 py-2.5 tabular-nums font-medium ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</td>
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>
                       <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>
                       <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
@@ -1672,7 +1727,14 @@ export function Holdings() {
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>
                       <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>
-                      <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-14 h-1.5 rounded-full bg-elevated overflow-hidden">
+                            <div className="h-full rounded-full bg-accent/70" style={{ width: `${Math.min((r.position_rate ?? 0) * 100, 100)}%` }} />
+                          </div>
+                          <span className="text-[11px] tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</span>
+                        </div>
+                      </td>
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <button onClick={() => setEditing(r)} className="p-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated" title="编辑/卖出"><Pencil className="h-3.5 w-3.5" /></button>
@@ -1709,6 +1771,42 @@ export function Holdings() {
             </table>
           </div>
         </div>
+
+        {/* 清仓明细 */}
+        {closedRows.length > 0 && (
+          <div className="rounded-card border border-border bg-surface overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+              <span className="text-sm font-semibold text-foreground">清仓明细</span>
+              <span className="text-xs text-muted">{closedRows.length} 只</span>
+              <button onClick={() => setShowClosed(v => !v)} className="ml-auto text-[11px] text-accent hover:underline">
+                {showClosed ? '收起' : '展开'}
+              </button>
+            </div>
+            {showClosed && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-muted border-b border-border/60 bg-elevated/30">
+                      {['名称/代码', '成本', '已实现盈亏', '清仓时间'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closedRows.map(r => (
+                      <tr key={r.symbol} className="border-b border-border/40">
+                        <td className="px-3 py-2 text-foreground">{r.name || r.symbol}<span className="font-mono text-muted text-xs ml-1.5">{r.symbol}</span></td>
+                        <td className="px-3 py-2 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
+                        <td className={`px-3 py-2 tabular-nums font-medium ${pnlColor(r.realized_pnl)}`}>{fmtMoney(r.realized_pnl)}</td>
+                        <td className="px-3 py-2 tabular-nums text-muted text-xs">{r.closed_at?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 持仓结构 + 盈亏贡献 */}
         {rows.length > 0 && (

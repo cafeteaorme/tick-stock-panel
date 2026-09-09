@@ -23,6 +23,9 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.config import settings
+from app.market_time import CN_TZ, HK_TZ
+
+import polars as pl
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +133,72 @@ def probe_endpoints(cookie: str) -> tuple[str | None, str]:
 
 # 交易日 (周一至五) 北京时间 9:31 / 16:05 各同步一次
 _SYNC_SLOTS = [(9, 31), (16, 5)]
+_HK_REFRESH_S = 60
+_hk_thread: threading.Thread | None = None
+_hk_stop = threading.Event()
+
+
+def start_hk_price_refresh() -> bool:
+    """持仓含港股且港股开市时段, 每 60s 用 TickFlow quotes 刷新价格并落库 (面板 quote 规则)。"""
+    global _hk_thread
+    if _hk_thread is not None and _hk_thread.is_alive():
+        return False
+    _hk_stop.clear()
+
+    def _loop() -> None:
+        import time as _time
+
+        import polars as _pl
+
+        from app.market_time import HK_TZ, US_EASTERN_TZ, market_open_now
+        from app.services import holdings as holdings_svc
+        from app.tickflow.client import get_client
+
+        tf = get_client()
+        while not _hk_stop.wait(_HK_REFRESH_S):
+            try:
+                obj = holdings_svc.list_accounts()
+                hk_syms: dict[str, str] = {}
+                for a in obj["accounts"]:
+                    for r in holdings_svc.list_all(a["id"]):
+                        if str(r["symbol"]).endswith(".HK") and float(r.get("qty") or 0) > 0:
+                            hk_syms.setdefault(r["symbol"], a["id"])
+                if not hk_syms or not market_open_now("HK"):
+                    continue
+                raw = tf.quotes.get(symbols=list(hk_syms), as_dataframe=True)
+                if raw is None or len(raw) == 0:
+                    continue
+                df = raw if isinstance(raw, _pl.DataFrame) else _pl.from_pandas(raw)
+                for rec in df.to_dicts():
+                    sym = rec.get("symbol")
+                    price = rec.get("last_price")
+                    if not sym or price is None:
+                        continue
+                    acc_id = hk_syms[sym]
+                    h = holdings_svc.get(acc_id, sym)
+                    qty = float(h.get("qty") or 0) if h else 0.0
+                    cost = h.get("avg_cost") if h else None
+                    pct = None
+                    ext = rec.get("ext.change_pct")
+                    try:
+                        pct = float(ext) if ext is not None else None
+                    except (TypeError, ValueError):
+                        pct = None
+                    holdings_svc.upsert(acc_id, sym, qty, qty, cost,
+                                        extras={"price": _fin(price), "change_pct": pct})
+                logger.info("tzzb hk price refresh: %d symbols", len(hk_syms))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("tzzb hk refresh error: %s", e)
+
+    _hk_thread = threading.Thread(target=_loop, daemon=True, name="tzzb-hk-refresh")
+    _hk_thread.start()
+    logger.info("tzzb hk price refresh started (60s, HK market hours)")
+    return True
+
+
+def _current_qty(holdings_svc, account_id: str, symbol: str) -> float:
+    h = holdings_svc.get(account_id, symbol)
+    return float(h.get("qty") or 0) if h else 0.0
 _SYNC_CHECK_S = 20
 _sync_thread: threading.Thread | None = None
 _sync_stop = threading.Event()
@@ -178,6 +247,15 @@ _API_BASE = "https://tzzb.10jqka.com.cn/caishen_httpserver/tzzb"
 
 _CDP_PORT = 9223
 _PROFILE_DIR = "chrome_tzzb_profile"
+
+
+def _fin(v):
+    import math
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def open_login_window() -> dict[str, Any]:
@@ -288,57 +366,114 @@ def _cdp_cookie() -> str:
 
 
 def _market_suffix(market: str, code: str) -> str:
-    if market in ("15", "176", "177", "178", "179", "180", "181", "182", "183"):
+    """严格映射: HK 仅 5 位数字码; 6 位数字码按开头归沪深; 北交 12/144。"""
+    code = code.strip()
+    if len(code) == 5 and code.isdigit():
         return ".HK"
-    if market == "2" or (len(code) == 6 and code.startswith(("5", "6", "9"))):
+    if len(code) == 6 and code.isdigit():
+        if code.startswith(("6", "5", "9")):
+            return ".SH"
+        if code.startswith(("0", "3")):
+            return ".SZ"
+        if code.startswith(("4", "8")):
+            return ".BJ"
+    # 兜底按 tzzb market 字段
+    if market in ("176", "177", "178", "179", "180", "181", "182", "183"):
+        return ".HK"
+    if market == "2":
         return ".SH"
-    if market == "1" or (len(code) == 6 and code.startswith(("0", "3"))):
+    if market == "1":
         return ".SZ"
-    if market in ("12", "144"):
+    if market == "12":
         return ".BJ"
-    return ".SH" if len(code) == 6 and code[0] in "569" else ".SZ"
+    logger.warning("未知市场代码 market=%s code=%s, 默认 .SZ", market, code)
+    return ".SZ"
 
 
-def reset_tzzb(holdings_svc) -> dict[str, Any]:
-    """重置投资账本对接: 清除 Cookie 配置 + 删除由账本同步生成的全部账户 (含持仓/快照/资金)。
+_HIST_NAME = "tzzb_history.json"
 
-    同步生成的账户以其 name 与账本 brokername 一致来识别 (见 sync 中创建逻辑)。
-    返回删除说明。
-    """
-    cfg = load_config()
-    accounts_raw = None
-    removed = []
-    cookie = (cfg.get("cookie") or "").strip()
-    if cookie:
-        try:
-            accounts_raw = _api("/caishen_fund/pc/account/v1/account_list", cookie, {})
-        except Exception:  # noqa: BLE001
-            accounts_raw = None
-    broker_names = []
-    if accounts_raw:
-        for b in (accounts_raw.get("common") or []) + (accounts_raw.get("rzrq") or []):
-            nm = (b.get("brokername") or b.get("manualname") or "").strip()
-            if nm:
-                broker_names.append(nm)
 
-    acc_obj = holdings_svc.list_accounts()
-    keep, drop = [], []
-    for a in acc_obj["accounts"]:
-        # default 始终保留; 同步生成的账户 (名称命中账本 brokername) 删除
-        (drop if (a["id"] != holdings_svc.DEFAULT_ACCOUNT and a["name"] in broker_names) else keep).append(a)
-    for a in drop:
-        holdings_svc.delete_account(a["id"])
-        removed.append(a["name"])
+def _hist_path() -> Path:
+    return settings.data_dir / "user_data" / _HIST_NAME
 
-    _store_path().write_text(json.dumps({
-        "cookie": "", "endpoint": "", "user_name": "", "last_sync": None,
-        "last_result": "已重置", "last_ok": False,
-    }, ensure_ascii=False, indent=2), "utf-8")
-    save_config(**{
-        "cookie": "", "endpoint": "", "user_name": "", "last_sync": None,
-        "last_result": "已重置", "last_ok": False,
-    })
-    return {"removed_accounts": removed, "cookie_cleared": True}
+
+def history_status() -> dict[str, Any]:
+    try:
+        obj = json.loads(_hist_path().read_text("utf-8"))
+        return {"cached": bool(obj.get("ok")), "date": obj.get("date"),
+                "days": len(obj.get("daily") or []), "fetched_at": obj.get("fetched_at")}
+    except Exception:  # noqa: BLE001
+        return {"cached": False, "date": None, "days": 0, "fetched_at": None}
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    import os
+
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), "utf-8")
+    os.replace(tmp, path)
+
+
+def _f_pl(v) -> float | None:
+    import math
+
+    try:
+        f = float(str(v).replace(",", "").replace("HK$", "").replace("$", ""))
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_history_cache() -> dict[str, Any]:
+    """拉取投资账本历史收益 (逐账户×逐年 month_calendar → profit_loss_list 月度权威值)。"""
+    cookie = _cdp_cookie()
+    save_config(cookie=cookie)
+    accounts_raw = _api("/caishen_fund/pc/account/v1/account_list", cookie, {})
+    fund_keys = [str(b.get("fund_key")) for b in (accounts_raw.get("common") or [])
+                 if b.get("fund_key")]
+
+    monthly_acc: dict[str, float] = {}
+    this_year = datetime.now(HK_TZ).date().year
+    fetched_months = 0
+    for fk in fund_keys:
+        for y in (this_year - 1, this_year, this_year - 2):
+            params = {"year": str(y), "type": "common", "fund_key": fk,
+                      "terminal": "123", "version": "11"}
+            try:
+                ex = _api("/caishen_fund/calendar/v1/month_calendar", cookie, params)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("tzzb month_calendar %s %d failed: %s", fk, y, e)
+                continue
+            for row in ex.get("profit_loss_list") or []:
+                d = str(row.get("date") or "")
+                if len(d) != 6:
+                    continue
+                pl_v = _f_pl(row.get("profit_loss"))
+                if pl_v is None:
+                    continue
+                period = f"{d[:4]}-{d[4:6]}"
+                monthly_acc[period] = round(monthly_acc.get(period, 0) + pl_v, 2)
+                fetched_months += 1
+
+    if not monthly_acc:
+        payload = {"ok": False, "date": datetime.now(HK_TZ).date().isoformat(),
+                   "monthly": [], "yearly": [],
+                   "message": "未拉取到历史收益数据（账户无记录或接口变化）"}
+        _atomic_write_json(_hist_path(), payload)
+        return {"ok": False, "message": payload["message"]}
+
+    yearly: dict[str, float] = {}
+    for period, v in monthly_acc.items():
+        yearly[period[:4]] = round(yearly.get(period[:4], 0) + v, 2)
+    payload = {
+        "ok": True,
+        "date": datetime.now(HK_TZ).date().isoformat(),
+        "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "monthly": [{"period": k, "pnl": v} for k, v in sorted(monthly_acc.items())],
+        "yearly": [{"period": k, "pnl": v} for k, v in sorted(yearly.items())],
+    }
+    _atomic_write_json(_hist_path(), payload)
+    return {"ok": True, "message": f"历史收益缓存成功：{len(monthly_acc)} 个月（{fetched_months} 条记录）"}
 
 
 def sync(account_id: str | None = None) -> dict[str, Any]:
@@ -371,7 +506,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
 
         def _f(v):
             try:
-                return float(v)
+                return float(re.sub(r"^(?:HK|US|CNY)?[$¥]", "", str(v).strip(), flags=re.IGNORECASE).replace(",", ""))
             except (TypeError, ValueError):
                 return None
         holdings_rows = []
@@ -402,6 +537,14 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
                 wl.add(symbol)
             holdings_rows.append({"symbol": symbol, "qty": qty, "available": qty,
                                   "avg_cost": cost or None})
+        # 清理失效行: 该账户下不在最新账本持仓中的 open 行 (错误符号/已移除)
+        valid = {r["symbol"] for r in holdings_rows}
+        df_acc = holdings_svc._read(acc_id)
+        stale = [x for x in df_acc.filter(pl.col("status") != "closed")["symbol"].to_list() if x not in valid]
+        if stale:
+            for sym in stale:
+                holdings_svc.remove(acc_id, sym)
+            logger.info("tzzb sync 清理失效持仓 %s: %s", raw_name, stale)
         holdings_svc.set_portfolio(acc_id, cash=cash)
         holdings_svc.save_snapshot(acc_id, today, cash=cash)
         synced_accounts.append({"name": raw_name, "account_id": acc_id,

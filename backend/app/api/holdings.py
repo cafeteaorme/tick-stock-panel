@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -96,28 +97,119 @@ def _fetch_quotes_map(request: Request, symbols: list[str]) -> dict[str, dict]:
     return {r.get("symbol"): r for r in rows or [] if r.get("symbol")}
 
 
-def _enrich_rows(rows: list[dict], rates: dict, name_map: dict[str, str] | None = None) -> list[dict]:
-    """本地优先: 价格/涨跌幅用同步落库值, 市值/盈亏按人民币口径本地计算 (毫秒响应)。"""
+def _fin(v) -> float | None:
+    """None/NaN/Inf → None (JSON 安全)。"""
+    import math
+
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError):
+        return None
+
+
+_MKT_CACHE: dict[str, tuple[float, dict[str, dict]]] = {"t": 0.0, "rows": {}}
+
+
+def _market_rows(request: Request, symbols: list[str], rates: dict) -> dict[str, dict]:
+    """从 TickFlow 本地数据计算每只持仓的市场字段 (60s 进程内缓存)。
+
+    返回 {symbol: {price, change_pct, m1_rate, m3_rate, m6_rate, m12_rate}}。
+    CN 走本地 enriched 批量; HK/US 优先本地 parquet, 缺失时单只拉取一次并落盘。
+    """
+    import time as _time
+
+    now = _time.time()
+    if now - _MKT_CACHE["t"] < 60 and _MKT_CACHE["rows"]:
+        return {k: v for k, v in _MKT_CACHE["rows"].items() if k in symbols}
+
+    repo = request.app.state.repo
+    out: dict[str, dict] = {}
+    cn = [s for s in symbols if not is_hk_or_us(s)]
+    hk_us = [s for s in symbols if is_hk_or_us(s)]
+
+    if cn:
+        try:
+            end = date.today()
+            start = end - timedelta(days=400)
+            df = repo.get_daily_batch(cn, start, end, columns=["symbol", "date", "close"])
+            for sym in cn:
+                sub = df.filter(pl.col("symbol") == sym).sort("date")
+                closes = sub["close"].to_list()
+                if len(closes) >= 2:
+                    out[sym] = _calc_market_fields(closes)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("market rows cn failed: %s", e)
+
+    from app.services.kline_sync import fetch_hk_us_daily_with_indicators
+
+    for sym in hk_us:
+        try:
+            df = fetch_hk_us_daily_with_indicators(sym, days=400)
+            if not df.is_empty() and "close" in df.columns:
+                closes = df.sort("date")["close"].to_list()
+                if len(closes) >= 2:
+                    out[sym] = _calc_market_fields(closes)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("market rows %s failed: %s", sym, e)
+
+    _MKT_CACHE["t"] = now
+    _MKT_CACHE["rows"] = out
+    return out
+
+
+def _calc_market_fields(closes: list[float]) -> dict:
+    """由收盘价序列计算现价/涨跌幅/近N月涨跌。"""
+    import math
+
+    def _rate(a: float, b: float) -> float | None:
+        if not b:
+            return None
+        v = a / b - 1
+        return round(v, 6) if math.isfinite(v) else None
+
+    last = float(closes[-1])
+    prev = float(closes[-2])
+    out = {"price": round(last, 4), "change_pct": _rate(last, prev)}
+    n = len(closes)
+    for label, back in (("m1_rate", 21), ("m3_rate", 63), ("m6_rate", 126), ("m12_rate", 252)):
+        out[label] = _rate(last, float(closes[-back])) if n > back else None
+    return out
+
+
+def _enrich_rows(rows: list[dict], rates: dict, name_map: dict[str, str] | None = None,
+                 market: dict[str, dict] | None = None) -> list[dict]:
+    """本地优先: 市场字段来自 TickFlow 本地数据 (_market_rows), 市值/盈亏人民币口径本地计算。"""
     out = []
     for r in rows:
         qty = float(r.get("qty") or 0)
         cost = float(r.get("avg_cost") or 0)
         region = get_region(r["symbol"])
         fx = _fx_rate(region, rates)
-        price = r.get("price")
-        pct = r.get("change_pct")
+        mk = (market or {}).get(r["symbol"]) or {}
+        price = _fin(mk.get("price"))
+        pct = _fin(mk.get("change_pct"))
+        m1, m3 = _fin(mk.get("m1_rate")), _fin(mk.get("m3_rate"))
+        m6, m12 = _fin(mk.get("m6_rate")), _fin(mk.get("m12_rate"))
         market_value = price * qty * fx if price is not None else None
         cost_cny = cost * fx if cost else 0.0
         float_pnl = (price * fx - cost_cny) * qty if (price is not None and cost_cny) else None
+        hold_days = _fin(r.get("hold_days"))
         out.append({
             **r,
+            "name": (name_map or {}).get(r["symbol"]),
             "region": region,
             "fx": fx,
-            "market_value": market_value,
-            "float_pnl": float_pnl,
-            "float_pnl_pct": ((price * fx - cost_cny) / cost_cny) if (price is not None and cost_cny) else None,
+            "price": price,
+            "change_pct": pct,
+            "market_value": _fin(market_value),
+            "float_pnl": _fin(float_pnl),
+            "float_pnl_pct": _fin(((price * fx - cost_cny) / cost_cny) if (price is not None and cost_cny) else None),
             "day_pnl": r.get("pre_profit"),
             "day_pnl_pct": r.get("pre_rate"),
+            "m1_rate": m1, "m3_rate": m3, "m6_rate": m6, "m12_rate": m12,
+            "position_rate": _fin(r.get("position_rate")),
+            "hold_days": hold_days,
         })
     return out
 
@@ -184,7 +276,9 @@ def list_holdings(request: Request, include_closed: bool = Query(False), account
     rows = holdings_service.list_all(acc, include_closed=include_closed)
     open_rows = [r for r in rows if r.get("status") != "closed"]
     repo = request.app.state.repo
-    enriched = _enrich_rows(open_rows, _rates(), repo.get_name_map([r["symbol"] for r in open_rows]))
+    rates = _rates()
+    symbols = [r["symbol"] for r in open_rows]
+    enriched = _enrich_rows(open_rows, rates, repo.get_name_map(symbols), _market_rows(request, symbols, rates))
     if include_closed:
         enriched = enriched + [r for r in rows if r.get("status") == "closed"]
     return {"rows": enriched, "account": acc}
@@ -195,7 +289,9 @@ def summary(request: Request, account: str | None = Query(None)):
     acc = _acc(request, account)
     rates = _rates()
     rows = holdings_service.list_all(acc)
-    enriched = _enrich_rows(rows, rates, request.app.state.repo.get_name_map([r["symbol"] for r in rows]))
+    symbols = [r["symbol"] for r in rows]
+    enriched = _enrich_rows(rows, rates, request.app.state.repo.get_name_map(symbols),
+                            _market_rows(request, symbols, rates))
     portfolio = holdings_service.get_portfolio(acc)
 
     total_value = sum(r["market_value"] or 0 for r in enriched)
@@ -400,6 +496,42 @@ def tzzb_clear_cookie():
 
     tzzb.save_config(cookie="", last_ok=False)
     return {"ok": True}
+
+
+@router.get("/tzzb/history-data")
+def tzzb_history_data():
+    """缓存的账本历史收益 (月/年权威值)。"""
+    from pathlib import Path
+
+    from app.config import settings
+    from app.services import tzzb
+
+    p = settings.data_dir / "user_data" / "tzzb_history.json"
+    if not p.exists():
+        return {"cached": False}
+    try:
+        obj = json.loads(p.read_text("utf-8"))
+        return {"cached": bool(obj.get("ok")), **obj}
+    except Exception:  # noqa: BLE001
+        return {"cached": False}
+
+
+@router.get("/tzzb/history-status")
+def tzzb_history_status():
+    from app.services import tzzb
+
+    return tzzb.history_status()
+
+
+@router.post("/tzzb/history")
+def tzzb_history_fetch():
+    """拉取投资账本日/月/年收益全历史并缓存。"""
+    from app.services import tzzb
+
+    try:
+        return tzzb.fetch_history_cache()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "message": f"历史拉取失败: {e}"}
 
 
 @router.post("/tzzb/sync")
@@ -639,6 +771,61 @@ def benchmark(
     }
 
 
+@router.get("/{symbol}/trades")
+def symbol_trades(request: Request, symbol: str, account: str | None = Query(None)):
+    """B/S 买卖点: 由每日持仓快照变动推导 (数量↑=B, ↓=S), 价格取当日收盘。"""
+    acc = _acc(request, account)
+    timeline = holdings_service.snapshot_timeline(acc)
+    repo = request.app.state.repo
+    end = date.today()
+    start = end - timedelta(days=400)
+
+    closes: list[tuple[str, float]] = []
+    try:
+        if is_hk_or_us(symbol):
+            from app.services.kline_sync import fetch_hk_us_daily_with_indicators
+
+            df = fetch_hk_us_daily_with_indicators(symbol, days=400)
+            if not df.is_empty():
+                closes = [(str(d), float(c)) for d, c in df.sort("date").select(["date", "close"]).iter_rows()]
+        else:
+            df = repo.get_daily_batch([symbol], start, end, columns=["date", "close"])
+            closes = [(str(d), float(c)) for d, c in df.sort("date").select(["date", "close"]).iter_rows()]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("trades closes failed %s: %s", symbol, e)
+
+    close_map = dict(closes)
+    sorted_dates = sorted(close_map)
+
+    def _close_on(d: str) -> float | None:
+        cand = [x for x in sorted_dates if x <= d]
+        return close_map[cand[-1]] if cand else None
+
+    # 快照时间线中该 symbol 的数量序列 → 变动事件
+    events: list[dict] = []
+    prev_qty: float | None = None
+    seen = set()
+    for seg in timeline:
+        for r in seg["rows"]:
+            if r["symbol"] != symbol:
+                continue
+            q = float(r.get("qty") or 0)
+            if seg["date"] in seen:
+                continue
+            seen.add(seg["date"])
+            if prev_qty is None or abs(q - prev_qty) > 1e-9:
+                px = _close_on(seg["date"]) or 0.0
+                typ = "B" if q > (prev_qty or 0) else "S"
+                events.append({"date": seg["date"], "type": typ, "price": px, "qty": q})
+            prev_qty = q
+            break
+
+    # 成本价参考线
+    h = holdings_service.get(acc, symbol)
+    cost = float(h.get("avg_cost") or 0) if h else None
+    return {"symbol": symbol, "events": events, "cost": cost}
+
+
 # ---------------------------------------------------------------- AI 组合体检
 
 
@@ -657,7 +844,9 @@ async def analyze_holdings(request: Request, account: str | None = Query(None)):
 
     summary_data = summary(request, account)
     rows = holdings_service.list_all(_acc(request, account))
-    enriched = _enrich_rows(rows, _rates(), request.app.state.repo.get_name_map([r["symbol"] for r in rows]))
+    symbols = [r["symbol"] for r in rows]
+    enriched = _enrich_rows(rows, _rates(), request.app.state.repo.get_name_map(symbols),
+                            _market_rows(request, symbols, rates))
 
     risk_brief = []
     repo = request.app.state.repo
