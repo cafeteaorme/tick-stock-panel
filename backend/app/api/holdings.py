@@ -380,6 +380,27 @@ def tzzb_set_cookie(req: dict):
     return {"ok": True, "cookie_set": bool(cfg.get("cookie"))}
 
 
+@router.post("/tzzb/autocookie")
+def tzzb_autocookie():
+    """自动读取本机 Chrome 系浏览器的 10jqka Cookie (钥匙串授权 + AES 解密)。"""
+    from app.services import tzzb
+
+    res = tzzb.auto_read_browser_cookie()
+    if res.get("ok"):
+        tzzb.save_config(cookie=res["cookie"], last_ok=False)
+        return {"ok": True, "source": res.get("source"), "message": f"已从 {res['source']} 读取到 10jqka Cookie"}
+    return {"ok": False, "message": res.get("message", "自动读取失败")}
+
+
+@router.post("/tzzb/clear")
+def tzzb_clear_cookie():
+    """清除无效 Cookie (同步失败后允许重新配置)。"""
+    from app.services import tzzb
+
+    tzzb.save_config(cookie="", last_ok=False)
+    return {"ok": True}
+
+
 @router.post("/tzzb/sync")
 def tzzb_sync(request: Request, account: str | None = Query(None)):
     """从投资账本拉取数据 (点击「投资账本导入」/「刷新」按钮)。成功/失败都返回 message 供 toast。"""
@@ -390,6 +411,12 @@ def tzzb_sync(request: Request, account: str | None = Query(None)):
         res = tzzb.sync(acc)
     except Exception as e:  # noqa: BLE001
         res = {"ok": False, "message": f"同步异常: {e}"}
+    if not res.get("ok"):
+        # 失败即清 Cookie, 前端下次点击可重新配置 (避免无效凭据卡死)
+        try:
+            tzzb.save_config(cookie="", last_ok=False)
+        except Exception:  # noqa: BLE001
+            pass
     return res
 
 

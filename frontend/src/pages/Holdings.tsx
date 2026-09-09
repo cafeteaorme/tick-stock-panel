@@ -702,6 +702,95 @@ function refreshHoldingsCaches(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
 }
 
+/** 投资账本 Cookie 配置对话框: 自动读取浏览器 Cookie (钥匙串授权) / 手动粘贴 */
+function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onConfigured: () => void }) {
+  const [cookie, setCookie] = useState('')
+  const [busy, setBusy] = useState<'' | 'auto' | 'manual'>('')
+
+  const autoRead = async () => {
+    setBusy('auto')
+    try {
+      const res = await api.holdingsTzzbAutoCookie()
+      if (res.ok) {
+        toast(`${res.message}，开始同步…`, 'success')
+        onConfigured()
+      } else {
+        toast(res.message, 'error')
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '自动读取失败', 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const manualSave = async () => {
+    if (!cookie.trim()) { toast('请先粘贴 Cookie', 'error'); return }
+    setBusy('manual')
+    try {
+      await api.holdingsTzzbSetCookie(cookie.trim())
+      toast('Cookie 已保存，开始同步…', 'success')
+      onConfigured()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '保存失败', 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative rounded-card border border-border bg-surface shadow-2xl w-[28rem] max-w-[94vw] max-h-[88vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
+          <div className="text-sm font-semibold text-foreground">连接投资账本</div>
+          <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* 自动读取 */}
+          <button
+            onClick={autoRead}
+            disabled={busy !== ''}
+            className="w-full inline-flex flex-col items-center gap-1 px-4 py-4 rounded-btn bg-accent/10 border border-accent/30 hover:bg-accent/20 disabled:opacity-40 transition-colors"
+          >
+            {busy === 'auto' ? <Loader2 className="h-5 w-5 animate-spin text-accent" /> : <Sparkles className="h-5 w-5 text-accent" />}
+            <span className="text-sm font-medium text-foreground">自动读取浏览器 Cookie（推荐）</span>
+            <span className="text-[10px] text-muted text-center leading-relaxed">
+              需已用 Chrome 登录过投资账本。macOS 会弹出钥匙串授权框，<br />请点击「始终允许」
+            </span>
+          </button>
+
+          <div className="flex items-center gap-2 text-[10px] text-muted">
+            <span className="flex-1 h-px bg-border" />或手动粘贴<span className="flex-1 h-px bg-border" />
+          </div>
+
+          {/* 手动粘贴 + 操作步骤 */}
+          <div className="rounded-btn bg-elevated/40 border border-border px-3.5 py-3 text-[11px] text-secondary leading-relaxed space-y-1">
+            <div className="font-medium text-foreground">操作步骤（Chrome）：</div>
+            <div>1. 用 Chrome 打开 tzzb.10jqka.com.cn 并登录</div>
+            <div>2. 按 <kbd className="px-1 py-px rounded bg-base border border-border font-mono text-[10px]">⌥⌘I</kbd>（Option+Command+I，或 <kbd className="px-1 py-px rounded bg-base border border-border font-mono text-[10px]">Fn+F12</kbd>）打开开发者工具</div>
+            <div>3. 切到 <span className="text-foreground">Network（网络）</span> 标签 → 刷新页面</div>
+            <div>4. 点任意一条发往 tzzb.10jqka.com.cn 的请求</div>
+            <div>5. 右侧「标头」→「请求标头」→ 找到 <span className="text-foreground">Cookie:</span> 一行 → <span className="text-accent">复制冒号后的整段值</span></div>
+            <div className="text-muted text-[10px]">Safari：设置 → 高级 → 勾选「显示开发菜单」→ ⌥⌘C 打开检查器，其余相同</div>
+          </div>
+          <textarea
+            value={cookie}
+            onChange={e => setCookie(e.target.value)}
+            placeholder="把复制的整段 Cookie 粘贴到这里"
+            rows={3}
+            className="w-full px-2.5 py-2 rounded-btn bg-base border border-border text-[11px] font-mono text-foreground focus:outline-none focus:border-accent/50 resize-none"
+          />
+          <button onClick={manualSave} disabled={busy !== '' || !cookie.trim()}
+            className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+            {busy === 'manual' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}保存并同步
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -1309,34 +1398,42 @@ export function Holdings() {
 
   // 投资账本同步 (导入 + 刷新共用; 成功/失败都 toast)
   const [tzzbSyncing, setTzzbSyncing] = useState(false)
+  const [showCookieDialog, setShowCookieDialog] = useState(false)
   const tzzbStatus = useQuery({
     queryKey: ['holdings-tzzb-status'],
     queryFn: api.holdingsTzzbStatus,
     refetchInterval: 60_000,
   })
-  const runTzzbSync = async (isRefresh = false) => {
+
+  const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)
     try {
-      const st = await api.holdingsTzzbStatus().catch(() => null)
-      if (!st?.cookie_set) {
-        const cookie = window.prompt(
-          '首次使用：请先在浏览器登录 tzzb.10jqka.com.cn（同花顺投资账本）\n然后 F12 → Network → 任意请求 → 复制整段 Cookie 粘贴到这里',
-          '',
-        )
-        if (!cookie?.trim()) { toast('已取消：未配置 Cookie', 'error'); return }
-        await api.holdingsTzzbSetCookie(cookie.trim())
-      }
       const res = await api.holdingsTzzbSync(activeAcc || undefined)
       refreshAll()
       qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
       qc.invalidateQueries({ queryKey: ['holdings-tzzb-status'] })
       if (res.ok) toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
-      else toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
+      else {
+        // 失败 → 后端已清无效 Cookie; 打开配置对话框让用户重新输入
+        setShowCookieDialog(true)
+        toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
+      }
+      return res.ok
     } catch (e) {
       toast(e instanceof Error ? e.message : '同步失败', 'error')
+      return false
     } finally {
       setTzzbSyncing(false)
     }
+  }
+
+  const runTzzbSync = async (isRefresh = false) => {
+    const st = await api.holdingsTzzbStatus().catch(() => null)
+    if (!st?.cookie_set) {
+      setShowCookieDialog(true)  // 未配置/已清除 → 先弹 Cookie 配置对话框
+      return
+    }
+    void doSync(isRefresh)
   }
 
   // 整页拖拽截图 → 自动识别导入
@@ -1605,6 +1702,12 @@ export function Holdings() {
           accountId={activeAcc}
           accountName={accounts.find(a => a.id === activeAcc)?.name || activeAcc}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+      {showCookieDialog && (
+        <TzzbCookieDialog
+          onClose={() => setShowCookieDialog(false)}
+          onConfigured={() => { setShowCookieDialog(false); void doSync(false) }}
         />
       )}
       {showImport && (

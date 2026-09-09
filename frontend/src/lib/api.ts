@@ -1508,6 +1508,10 @@ export const api = {
     request<{ cookie_set: boolean; endpoint?: string; user_name?: string; last_sync?: string | null; last_result?: string; last_ok?: boolean }>('/api/holdings/tzzb/status'),
   holdingsTzzbSetCookie: (cookie: string) =>
     request<{ ok: boolean }>('/api/holdings/tzzb/cookie', { method: 'PUT', body: JSON.stringify({ cookie }) }),
+  holdingsTzzbAutoCookie: () =>
+    request<{ ok: boolean; source?: string; message: string }>('/api/holdings/tzzb/autocookie', { method: 'POST' }),
+  holdingsTzzbClear: () =>
+    request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbSync: (account?: string) =>
     request<{ ok: boolean; message: string; endpoint?: string; user_name?: string; imported?: number }>(
       `/api/holdings/tzzb/sync${account ? `?account=${encodeURIComponent(account)}` : ''}`, { method: 'POST' },

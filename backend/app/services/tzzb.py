@@ -10,6 +10,7 @@ Cookie 获取方式: 浏览器登录 tzzb.10jqka.com.cn → F12 → Network → 
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import logging
 import re
@@ -210,3 +211,102 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
         "rows_hint": rows[:50],
         "imported": imported,
     }
+
+
+# ---------------------------------------------------------------- 自动读取浏览器 Cookie (Chrome 系)
+
+_COOKIE_DOMAIN_KEY = "10jqka"
+
+# (浏览器名, 钥匙串服务名, Cookie 库相对路径)
+_CHROMIUM_BROWSERS = [
+    ("Chrome", "Chrome Safe Storage", "Google/Chrome/Default/Cookies"),
+    ("Edge", "Microsoft Edge Safe Storage", "Microsoft Edge/Default/Cookies"),
+    ("Brave", "Brave Safe Storage", "BraveSoftware/Brave-Browser/Default/Cookies"),
+]
+
+
+def auto_read_browser_cookie() -> dict[str, Any]:
+    """从本机 Chromium 系浏览器解密 10jqka 域 Cookie (仅读取该域, 不出本机)。
+
+    流程: 钥匙串取 Safe Storage 密钥 (macOS 弹一次授权框) → 复制 Cookie 库到临时文件
+    → sqlite 查询 → AES-128-CBC 解密 v10 值 (PBKDF2-SHA1/1003 轮/saltysalt, IV=16空格)。
+    返回 {ok, cookie|message, source}。
+    """
+    import sqlite3
+    import subprocess
+    import tempfile
+
+    from Crypto.Cipher import AES
+
+    home = Path.home()
+    errors: list[str] = []
+    for browser, service, rel in _CHROMIUM_BROWSERS:
+        db = home / "Library" / "Application Support" / rel
+        if not db.exists():
+            errors.append(f"{browser}: 未安装")
+            continue
+        # 1) 钥匙串密钥 (首次弹授权框, 用户点「始终允许」)
+        try:
+            key_pass = subprocess.run(
+                ["/usr/bin/security", "find-generic-password", "-w", "-s", service],
+                capture_output=True, text=True, timeout=120,
+            )
+            if key_pass.returncode != 0 or not key_pass.stdout.strip():
+                errors.append(f"{browser}: 钥匙串未授权 ({key_pass.stderr.strip()[:60]})")
+                continue
+            key_pass = key_pass.stdout.strip()
+        except subprocess.TimeoutExpired:
+            errors.append(f"{browser}: 钥匙串授权超时 (请重试并在弹窗点「始终允许」)")
+            continue
+
+        # 2) 复制 DB (浏览器运行中库被锁)
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
+                tmp = tf.name
+            subprocess.run(["cp", str(db), tmp], check=True, timeout=30)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{browser}: Cookie 库复制失败 ({e})")
+            continue
+
+        # 3) 查询 + 解密
+        try:
+            con = sqlite3.connect(tmp)
+            rows = con.execute(
+                "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE ?",
+                (f"%{_COOKIE_DOMAIN_KEY}%",),
+            ).fetchall()
+            con.close()
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{browser}: Cookie 库读取失败 ({e})")
+            continue
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+
+        if not rows:
+            errors.append(f"{browser}: 未找到 10jqka 域 Cookie (请先在该浏览器登录投资账本)")
+            continue
+
+        key = hashlib.pbkdf2_hmac("sha1", key_pass.encode(), b"saltysalt", 1003, dklen=16)
+        iv = b" " * 16
+        pairs = []
+        for name, enc in rows:
+            if not enc:
+                continue
+            try:
+                blob = enc
+                if blob[:3] == b"v10":
+                    blob = blob[3:]
+                dec = AES.new(key, AES.MODE_CBC, iv).decrypt(blob)
+                dec = dec[:-dec[-1]] if 0 < dec[-1] <= 16 else dec  # 去 PKCS7
+                val = dec.decode("utf-8", errors="replace")
+                if val:
+                    pairs.append(f"{name}={val}")
+            except Exception:  # noqa: BLE001
+                continue
+        if not pairs:
+            errors.append(f"{browser}: Cookie 解密失败 (浏览器版本过新? 请手动粘贴)")
+            continue
+
+        return {"ok": True, "cookie": "; ".join(pairs), "source": browser}
+
+    return {"ok": False, "message": "；".join(errors)}
