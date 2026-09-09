@@ -33,13 +33,11 @@ _UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 # 候选数据端点 (无公开文档, 按常见形态探测; 命中即缓存到本地配置)
 _CANDIDATE_ENDPOINTS = [
-    "/api/v1/stock/positions",
-    "/api/positions",
-    "/api/stock/positions",
-    "/api/v1/accounts",
-    "/api/accounts",
-    "/api/user/info",
-    "/api/v1/user/info",
+    # 从 tzzb 前端子应用 (tzzbWeb/summary/calendarPage.html 等) 抓包确认的真实路径
+    "/caishen_fund/stock/getAccounts",
+    "/caishen_fund/stock/index",
+    "/caishen_fund/stock/profitlossByCode",
+    "/caishen_fund/stockSummary/judgeHkStock",
 ]
 
 
@@ -73,7 +71,7 @@ def _assert_safe(url: str) -> None:
             raise ValueError("解析到内网地址, 已拒绝")
 
 
-def _get(url: str, cookie: str) -> tuple[int, str]:
+def _get(url: str, cookie: str, method: str = "GET") -> tuple[int, str]:
     _assert_safe(url)
     req = urllib.request.Request(url, headers={
         "User-Agent": _UA,
@@ -81,7 +79,7 @@ def _get(url: str, cookie: str) -> tuple[int, str]:
         "Referer": f"https://{_ALLOWED_HOST}/",
         "X-Requested-With": "XMLHttpRequest",
         "Accept": "application/json, text/plain, */*",
-    })
+    }, method=method)
     opener = urllib.request.build_opener(_NoRedirect)
     with opener.open(req, timeout=_TIMEOUT) as resp:
         return resp.status, resp.read().decode("utf-8", errors="replace")
@@ -92,26 +90,39 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _probe_hit(status: int, body: str) -> bool:
+    """命中判定: 200 + JSON 对象/数组, 且不是登录跳转/错误壳。"""
+    if status != 200:
+        return False
+    t = body.strip()
+    if not (t.startswith("{") or t.startswith("[")):
+        return False
+    try:
+        obj = json.loads(t)
+    except Exception:  # noqa: BLE001
+        return False
+    flat = json.dumps(obj, ensure_ascii=False)
+    bad = ("passport", "login.html", '"\u767b\u5f55"')  # 登录页跳转特征
+    if any(b in flat for b in bad) and "data" not in obj if isinstance(obj, dict) else False:
+        return False
+    return True
+
+
 def probe_endpoints(cookie: str) -> tuple[str | None, str]:
-    """依次探测候选端点, 返回 (命中的端点, 说明)。"""
+    """依次探测候选端点 (GET 未中补 POST), 返回 (命中的端点, 响应样本)。"""
+    samples: list[str] = []
     for ep in _CANDIDATE_ENDPOINTS:
         url = f"https://{_ALLOWED_HOST}{ep}"
-        try:
-            status, body = _get(url, cookie)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("probe %s err: %s", ep, e)
-            continue
-        if status == 200 and body.strip().startswith("{"):
+        for method in ("GET", "POST"):
             try:
-                obj = json.loads(body)
-                # 简单判定: JSON 且非登录跳转
-                if isinstance(obj, dict) and not any(k in obj for k in ("login", "redirect")):
-                    return ep, body[:2000]
-            except Exception:  # noqa: BLE001
+                status, body = _get(url, cookie, method=method)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("probe %s %s err: %s", method, ep, e)
                 continue
-        elif status in (301, 302, 401, 403):
-            continue
-    return None, "未探测到可用数据接口 (可能需要配合浏览器抓包更新端点列表)"
+            if _probe_hit(status, body):
+                return ep, body[:2000]
+            samples.append(f"{method} {ep} -> {status} {body[:80]!r}")
+    return None, "；".join(samples[-4:]) if samples else "全部端点请求失败"
 
 
 _SYNC_INTERVAL_S = 3600  # 每小时
@@ -143,170 +154,185 @@ def start_background_sync() -> bool:
     return True
 
 
-def sync(account_id: str | None = None) -> dict[str, Any]:
-    """执行同步: 探测接口 → 拉账户名/持仓 → 写入本地账户。
+_API_BASE = "https://tzzb.10jqka.com.cn/caishen_httpserver/tzzb"
 
-    任何失败都以 {ok: False, message} 返回, 交由前端 toast。
-    """
-    from app.services import holdings as holdings_svc
 
-    cfg = load_config()
-    cookie = (cfg.get("cookie") or "").strip()
-    if not cookie:
-        return {"ok": False, "message": "尚未配置投资账本 Cookie：浏览器登录 tzzb.10jqka.com.cn 后，在 F12 Network 里复制整段 Cookie 粘贴到持仓设置"}
+_CDP_PORT = 9223
+_PROFILE_DIR = "chrome_tzzb_profile"
 
-    endpoint = cfg.get("endpoint") or ""
-    body = ""
-    if endpoint:
-        try:
-            _, body = _get(f"https://{_ALLOWED_HOST}{endpoint}", cookie)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("tzzb cached endpoint failed: %s", e)
-            endpoint, body = "", ""
-    if not endpoint or not body:
-        endpoint, probe_body = probe_endpoints(cookie)
-        body = probe_body
-        if not endpoint:
-            save_config(last_sync=datetime.utcnow().isoformat(timespec="seconds"),
-                        last_result="未探测到可用接口", last_ok=False)
-            return {"ok": False, "message": "同步失败：未探测到投资账本数据接口（页面为登录制且无公开 API）。请配合浏览器抓包提供接口路径，或继续使用截图导入"}
-        save_config(endpoint=endpoint)
 
-    # 解析返回: 提取账户名与持仓 (尽力而为, 字段形态未知 → 宽容匹配)
+def open_login_window() -> dict[str, Any]:
+    """打开专用 Chrome 配置目录的登录窗口 (登录一次, 配置目录长期记住登录态)。"""
+    import subprocess
+
+    profile = settings.data_dir / _PROFILE_DIR
+    profile.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen([
+        "open", "-na", "Google Chrome", "--args",
+        f"--user-data-dir={profile}",
+        f"--remote-debugging-port={_CDP_PORT}",
+        "--no-first-run", "--no-default-browser-check",
+        "https://tzzb.10jqka.com.cn/pc/index.html",
+    ])
+    return {"ok": True, "message": "已打开专用 Chrome 登录窗口，请在窗口内登录投资账本（登录一次即可，之后自动同步）"}
+
+
+def _cdp_json(path: str) -> Any:
+    import urllib.request as _ur
+
+    opener = _ur.build_opener(_ur.ProxyHandler({}))
+    with opener.open(f"http://127.0.0.1:{_CDP_PORT}{path}", timeout=8) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _cdp_port_alive() -> bool:
     try:
-        obj = json.loads(body)
+        _cdp_json("/json/version")
+        return True
     except Exception:  # noqa: BLE001
-        obj = {}
-    flattened = json.dumps(obj, ensure_ascii=False)
+        return False
 
-    user_name = cfg.get("user_name") or ""
-    name_m = re.search(r'"(?:name|nickname|user_?name)"\s*:\s*"([^"]{1,24})"', flattened)
-    if name_m:
-        user_name = name_m.group(1)
 
-    # 持仓: 宽容提取 code/name/qty/cost
-    rows = []
-    for m in re.finditer(r'\{[^{}]*"code"\s*:\s*"(\d{4,6}|[A-Z.]{1,8})"[^{}]*\}', flattened):
-        seg = m.group(0)
-        def _g(key: str) -> Any:
-            mm = re.search(rf'"{key}"\s*:\s*("?[^,"}}]+"?)', seg)
-            return mm.group(1).strip('"') if mm else None
-        rows.append({"code": m.group(1), "name": _g("name"), "qty": _g("qty"), "cost": _g("cost")})
+def fetch_cookies_via_cdp() -> str:
+    """通过 CDP 读取专用 Chrome 的全部 10jqka Cookie (含 httpOnly)。返回 cookie 串。
 
-    # 命中/落地
-    acc = account_id or holdings_svc.DEFAULT_ACCOUNT
-    imported = 0
-    if rows:
-        for r in rows:
-            imported += 1 if r.get("qty") else 0
+    端口未起 (用户窗口已关) → 无头拉起同一配置目录自动完成。
+    """
+    import time as _time
+    import websocket
+
+    if not _cdp_port_alive():
+        profile = settings.data_dir / _PROFILE_DIR
+        profile.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen([
+            "open", "-na", "Google Chrome", "--args",
+            f"--user-data-dir={profile}",
+            f"--remote-debugging-port={_CDP_PORT}",
+            "--headless=new", "--no-first-run", "about:blank",
+        ])
+        for _ in range(20):
+            _time.sleep(1)
+            if _cdp_port_alive():
+                break
+        else:
+            raise RuntimeError("无法启动 Chrome 调试端口 (若该窗口开着请先关闭后重试)")
+
+    targets = _cdp_json("/json/list")
+    page = next((t for t in targets if t.get("type") == "page"), None)
+    if not page:
+        raise RuntimeError("CDP 无可用页面")
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=15, suppress_origin=True)
+    try:
+        ws.send(json.dumps({"id": 1, "method": "Network.getAllCookies"}))
+        while True:
+            msg = json.loads(ws.recv())
+            if msg.get("id") == 1:
+                cookies = (msg.get("result") or {}).get("cookies") or []
+                break
+    finally:
+        ws.close()
+    pairs = [f"{c['name']}={c['value']}" for c in cookies if "10jqka" in (c.get("domain") or "")]
+    if not pairs:
+        raise RuntimeError("专用 Chrome 中未发现 10jqka Cookie (请先在该窗口登录投资账本)")
+    return "; ".join(pairs)
+
+
+def _api(ep: str, cookie: str, params: dict) -> dict:
+    import urllib.parse
+
+    qs = urllib.parse.urlencode({**params,
+        "terminal": "1", "version": "0.0.0", "userid": _uid(cookie), "user_id": _uid(cookie)})
+    url = f"{_API_BASE}{ep}?{qs}"
+    status, body = _get(url, cookie)
+    if status != 200:
+        raise RuntimeError(f"{ep} HTTP {status}")
+    obj = json.loads(body)
+    if str(obj.get("error_code")) != "0":
+        raise RuntimeError(f"{ep} error_code={obj.get('error_code')} {str(obj.get('error_msg'))[:80]}")
+    return obj.get("ex_data") or {}
+
+
+def _uid(cookie: str) -> str:
+    m = re.search(r"(?:^|;\s*)userid=([^;]+)", cookie)
+    return m.group(1) if m else ""
+
+
+def _cdp_cookie() -> str:
+    try:
+        return fetch_cookies_via_cdp()
+    except Exception:
+        cfg = load_config()
+        saved = (cfg.get("cookie") or "").strip()
+        if saved:
+            return saved
+        raise
+
+
+def _market_suffix(market: str, code: str) -> str:
+    if market in ("15", "176", "177", "178", "179", "180", "181", "182", "183"):
+        return ".HK"
+    if market == "2" or (len(code) == 6 and code.startswith(("5", "6", "9"))):
+        return ".SH"
+    if market == "1" or (len(code) == 6 and code.startswith(("0", "3"))):
+        return ".SZ"
+    if market in ("12", "144"):
+        return ".BJ"
+    return ".SH" if len(code) == 6 and code[0] in "569" else ".SZ"
+
+
+def sync(account_id: str | None = None) -> dict[str, Any]:
+    """同步投资账本: CDP 取 Cookie → 遍历券商账户 → 持仓写入本地 (当日持仓 + 快照)。"""
+    from app.services import holdings as holdings_svc
+    from app.services import watchlist as wl
+
+    cookie = _cdp_cookie()
+    save_config(cookie=cookie)
+
+    accounts_raw = _api("/caishen_fund/pc/account/v1/account_list", cookie, {})
+    brokers = (accounts_raw.get("common") or []) + (accounts_raw.get("rzrq") or [])
+
+    today = datetime.utcnow().date().isoformat()
+    synced_accounts = []
+    total_positions = 0
+
+    for b in brokers:
+        fund_key = str(b.get("fund_key") or "")
+        if not fund_key:
+            continue
+        raw_name = (b.get("brokername") or b.get("manualname") or fund_key).strip()
+        # 本地账户: 按名称匹配, 无则创建
+        acc_obj = holdings_svc.list_accounts()
+        acc_id = next((a["id"] for a in acc_obj["accounts"] if a["name"] == raw_name), None)
+        if acc_id is None:
+            acc = holdings_svc.create_account(raw_name)
+            acc_id = acc["id"]
+
+        pos_raw = _api("/caishen_fund/pc/asset/v1/stock_position", cookie,
+                       {"fund_key": fund_key, "type": "common"})
+        positions = pos_raw.get("position") or []
+        cash = float(pos_raw.get("money_remain") or 0)
+
+        holdings_rows = []
+        for p in positions:
+            code = str(p.get("code") or "").strip()
+            market = str(p.get("market") or "")
+            if not code:
+                continue
+            symbol = code + _market_suffix(market, code)
+            qty = float(p.get("count") or 0)
+            cost = float(p.get("cost") or 0)
+            holdings_svc.upsert(acc_id, symbol, qty, qty, cost)
+            if symbol not in {r["symbol"] for r in wl.list_symbols()}:
+                wl.add(symbol)
+            holdings_rows.append({"symbol": symbol, "qty": qty, "available": qty,
+                                  "avg_cost": cost or None})
+        holdings_svc.set_portfolio(acc_id, cash=cash)
+        holdings_svc.save_snapshot(acc_id, today, cash=cash)
+        synced_accounts.append({"name": raw_name, "account_id": acc_id,
+                                "positions": len(holdings_rows), "cash": cash})
+        total_positions += len(holdings_rows)
 
     save_config(last_sync=datetime.utcnow().isoformat(timespec="seconds"),
-                user_name=user_name,
-                last_result=f"接口 {endpoint} · 解析 {len(rows)} 条持仓", last_ok=True)
-    return {
-        "ok": True,
-        "message": f"同步成功：接口 {endpoint}，账户「{user_name or '未知名'}」，解析 {len(rows)} 条持仓记录",
-        "endpoint": endpoint,
-        "user_name": user_name,
-        "rows_hint": rows[:50],
-        "imported": imported,
-    }
-
-
-# ---------------------------------------------------------------- 自动读取浏览器 Cookie (Chrome 系)
-
-_COOKIE_DOMAIN_KEY = "10jqka"
-
-# (浏览器名, 钥匙串服务名, Cookie 库相对路径)
-_CHROMIUM_BROWSERS = [
-    ("Chrome", "Chrome Safe Storage", "Google/Chrome/Default/Cookies"),
-    ("Edge", "Microsoft Edge Safe Storage", "Microsoft Edge/Default/Cookies"),
-    ("Brave", "Brave Safe Storage", "BraveSoftware/Brave-Browser/Default/Cookies"),
-]
-
-
-def auto_read_browser_cookie() -> dict[str, Any]:
-    """从本机 Chromium 系浏览器解密 10jqka 域 Cookie (仅读取该域, 不出本机)。
-
-    流程: 钥匙串取 Safe Storage 密钥 (macOS 弹一次授权框) → 复制 Cookie 库到临时文件
-    → sqlite 查询 → AES-128-CBC 解密 v10 值 (PBKDF2-SHA1/1003 轮/saltysalt, IV=16空格)。
-    返回 {ok, cookie|message, source}。
-    """
-    import sqlite3
-    import subprocess
-    import tempfile
-
-    from Crypto.Cipher import AES
-
-    home = Path.home()
-    errors: list[str] = []
-    for browser, service, rel in _CHROMIUM_BROWSERS:
-        db = home / "Library" / "Application Support" / rel
-        if not db.exists():
-            errors.append(f"{browser}: 未安装")
-            continue
-        # 1) 钥匙串密钥 (首次弹授权框, 用户点「始终允许」)
-        try:
-            key_pass = subprocess.run(
-                ["/usr/bin/security", "find-generic-password", "-w", "-s", service],
-                capture_output=True, text=True, timeout=120,
-            )
-            if key_pass.returncode != 0 or not key_pass.stdout.strip():
-                errors.append(f"{browser}: 钥匙串未授权 ({key_pass.stderr.strip()[:60]})")
-                continue
-            key_pass = key_pass.stdout.strip()
-        except subprocess.TimeoutExpired:
-            errors.append(f"{browser}: 钥匙串授权超时 (请重试并在弹窗点「始终允许」)")
-            continue
-
-        # 2) 复制 DB (浏览器运行中库被锁)
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
-                tmp = tf.name
-            subprocess.run(["cp", str(db), tmp], check=True, timeout=30)
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{browser}: Cookie 库复制失败 ({e})")
-            continue
-
-        # 3) 查询 + 解密
-        try:
-            con = sqlite3.connect(tmp)
-            rows = con.execute(
-                "SELECT name, encrypted_value FROM cookies WHERE host_key LIKE ?",
-                (f"%{_COOKIE_DOMAIN_KEY}%",),
-            ).fetchall()
-            con.close()
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"{browser}: Cookie 库读取失败 ({e})")
-            continue
-        finally:
-            Path(tmp).unlink(missing_ok=True)
-
-        if not rows:
-            errors.append(f"{browser}: 未找到 10jqka 域 Cookie (请先在该浏览器登录投资账本)")
-            continue
-
-        key = hashlib.pbkdf2_hmac("sha1", key_pass.encode(), b"saltysalt", 1003, dklen=16)
-        iv = b" " * 16
-        pairs = []
-        for name, enc in rows:
-            if not enc:
-                continue
-            try:
-                blob = enc
-                if blob[:3] == b"v10":
-                    blob = blob[3:]
-                dec = AES.new(key, AES.MODE_CBC, iv).decrypt(blob)
-                dec = dec[:-dec[-1]] if 0 < dec[-1] <= 16 else dec  # 去 PKCS7
-                val = dec.decode("utf-8", errors="replace")
-                if val:
-                    pairs.append(f"{name}={val}")
-            except Exception:  # noqa: BLE001
-                continue
-        if not pairs:
-            errors.append(f"{browser}: Cookie 解密失败 (浏览器版本过新? 请手动粘贴)")
-            continue
-
-        return {"ok": True, "cookie": "; ".join(pairs), "source": browser}
-
-    return {"ok": False, "message": "；".join(errors)}
+                last_result=f"同步 {len(synced_accounts)} 账户 {total_positions} 条持仓", last_ok=True)
+    return {"ok": True, "message": f"同步成功：{len(synced_accounts)} 个账户，共 {total_positions} 条持仓",
+            "accounts": synced_accounts}

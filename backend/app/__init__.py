@@ -5,7 +5,7 @@ import sys
 __version__ = "0.1.88"
 # 本分支修订号 (cafeteaorme/tick-stock-panel): 版本规则 = 上游版本-修订序号
 # 每次发布递增 0.01 且不随上游升级重置 (如 0.1.88-0.01 → 0.1.88-0.02 → 0.1.89-0.03)
-__revision__ = "0.16"
+__revision__ = "0.17"
 
 
 def branch_version() -> str:

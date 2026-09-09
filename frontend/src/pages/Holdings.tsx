@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  BookMarked, Briefcase, CalendarDays, Camera, ChevronDown, Loader2, Pencil, PieChart as PieIcon,
+  BookMarked, Briefcase, CalendarDays, Camera, Check, ChevronDown, ExternalLink, Loader2, Pencil, PieChart as PieIcon,
   Plus, RefreshCw, Settings as SettingsIcon, Sparkles, TrendingUp, Trash2, Wallet, X,
 } from 'lucide-react'
 import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
@@ -702,23 +702,37 @@ function refreshHoldingsCaches(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['watchlist-enriched'] })
 }
 
-/** 投资账本 Cookie 配置对话框: 自动读取浏览器 Cookie (钥匙串授权) / 手动粘贴 */
+/** 投资账本连接对话框: 专用 Chrome 登录 (登录一次) + CDP 自动取 Cookie 同步 + 手动粘贴备用 */
 function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onConfigured: () => void }) {
   const [cookie, setCookie] = useState('')
-  const [busy, setBusy] = useState<'' | 'auto' | 'manual'>('')
+  const [busy, setBusy] = useState<'' | 'open' | 'sync' | 'manual'>('')
+  const [loginOpened, setLoginOpened] = useState(false)
 
-  const autoRead = async () => {
-    setBusy('auto')
+  const openWindow = async () => {
+    setBusy('open')
     try {
-      const res = await api.holdingsTzzbAutoCookie()
+      const res = await api.holdingsTzzbOpenLogin()
+      setLoginOpened(true)
+      toast(res.message, 'success')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '打开失败', 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const syncNow = async () => {
+    setBusy('sync')
+    try {
+      const res = await api.holdingsTzzbSync()
       if (res.ok) {
-        toast(`${res.message}，开始同步…`, 'success')
+        toast(res.message, 'success')
         onConfigured()
       } else {
         toast(res.message, 'error')
       }
     } catch (e) {
-      toast(e instanceof Error ? e.message : '自动读取失败', 'error')
+      toast(e instanceof Error ? e.message : '同步失败', 'error')
     } finally {
       setBusy('')
     }
@@ -729,7 +743,7 @@ function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onCo
     setBusy('manual')
     try {
       await api.holdingsTzzbSetCookie(cookie.trim())
-      toast('Cookie 已保存，开始同步…', 'success')
+      toast('Cookie 已保存', 'success')
       onConfigured()
     } catch (e) {
       toast(e instanceof Error ? e.message : '保存失败', 'error')
@@ -747,51 +761,59 @@ function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onCo
           <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* 自动读取 */}
           <button
-            onClick={autoRead}
+            onClick={openWindow}
             disabled={busy !== ''}
             className="w-full inline-flex flex-col items-center gap-1 px-4 py-4 rounded-btn bg-accent/10 border border-accent/30 hover:bg-accent/20 disabled:opacity-40 transition-colors"
           >
-            {busy === 'auto' ? <Loader2 className="h-5 w-5 animate-spin text-accent" /> : <Sparkles className="h-5 w-5 text-accent" />}
-            <span className="text-sm font-medium text-foreground">自动读取浏览器 Cookie（推荐）</span>
+            {busy === 'open' ? <Loader2 className="h-5 w-5 animate-spin text-accent" /> : <ExternalLink className="h-5 w-5 text-accent" />}
+            <span className="text-sm font-medium text-foreground">打开投资账本登录窗口</span>
             <span className="text-[10px] text-muted text-center leading-relaxed">
-              需已用 Chrome 登录过投资账本。macOS 会弹出钥匙串授权框，<br />请点击「始终允许」
+              用独立的 Chrome 窗口登录一次（扫码/手机号），登录态保存在专用配置里，<br />之后每小时自动同步、无需重复登录
             </span>
           </button>
 
+          {loginOpened && (
+            <button
+              onClick={syncNow}
+              disabled={busy !== ''}
+              className="w-full h-10 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5"
+            >
+              {busy === 'sync' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              我已登录，立即同步
+            </button>
+          )}
+
           <div className="flex items-center gap-2 text-[10px] text-muted">
-            <span className="flex-1 h-px bg-border" />或手动粘贴<span className="flex-1 h-px bg-border" />
+            <span className="flex-1 h-px bg-border" />备用：手动粘贴 Cookie<span className="flex-1 h-px bg-border" />
           </div>
 
-          {/* 手动粘贴 + 操作步骤 */}
-          <div className="rounded-btn bg-elevated/40 border border-border px-3.5 py-3 text-[11px] text-secondary leading-relaxed space-y-1">
-            <div className="font-medium text-foreground">操作步骤（Chrome）：</div>
-            <div>1. 用 Chrome 打开 tzzb.10jqka.com.cn 并登录</div>
-            <div>2. 按 <kbd className="px-1 py-px rounded bg-base border border-border font-mono text-[10px]">⌥⌘I</kbd>（Option+Command+I，或 <kbd className="px-1 py-px rounded bg-base border border-border font-mono text-[10px]">Fn+F12</kbd>）打开开发者工具</div>
-            <div>3. 切到 <span className="text-foreground">Network（网络）</span> 标签 → 刷新页面</div>
-            <div>4. 点任意一条发往 tzzb.10jqka.com.cn 的请求</div>
-            <div>5. 右侧「标头」→「请求标头」→ 找到 <span className="text-foreground">Cookie:</span> 一行 → <span className="text-accent">复制冒号后的整段值</span></div>
-            <div className="text-muted text-[10px]">Safari：设置 → 高级 → 勾选「显示开发菜单」→ ⌥⌘C 打开检查器，其余相同</div>
-          </div>
+          <details className="rounded-btn bg-elevated/40 border border-border px-3.5 py-2.5 text-[11px] text-secondary">
+            <summary className="cursor-pointer text-foreground">展开：如何获取 Cookie（Chrome 快捷键 ⌥⌘I / Fn+F12）</summary>
+            <div className="mt-1.5 space-y-1 leading-relaxed">
+              <div>1. 用 Chrome 打开 tzzb.10jqka.com.cn 并登录</div>
+              <div>2. 按 <kbd className="px-1 py-px rounded bg-base border border-border font-mono text-[10px]">⌥⌘I</kbd>（或 <kbd className="px-1 py-px rounded bg-base border border-border font-mono text-[10px]">Fn+F12</kbd>）打开开发者工具</div>
+              <div>3. 切到 <span className="text-foreground">Network（网络）</span> → 刷新页面</div>
+              <div>4. 点任意一条发往 tzzb.10jqka.com.cn 的请求</div>
+              <div>5. 「标头」→「请求标头」→ <span className="text-foreground">Cookie:</span> 行 → 复制整段值粘贴到下方</div>
+            </div>
+          </details>
           <textarea
             value={cookie}
             onChange={e => setCookie(e.target.value)}
-            placeholder="把复制的整段 Cookie 粘贴到这里"
-            rows={3}
+            placeholder="粘贴 Cookie（备用方式）"
+            rows={2}
             className="w-full px-2.5 py-2 rounded-btn bg-base border border-border text-[11px] font-mono text-foreground focus:outline-none focus:border-accent/50 resize-none"
           />
           <button onClick={manualSave} disabled={busy !== '' || !cookie.trim()}
-            className="w-full h-9 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
-            {busy === 'manual' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}保存并同步
+            className="w-full h-8 rounded-btn bg-elevated text-secondary text-xs hover:text-foreground disabled:opacity-40">
+            保存 Cookie
           </button>
         </div>
       </div>
     </div>
   )
-}
-
-function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
+}function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [queue, setQueue] = useState<PickedImage[]>([])
@@ -1413,11 +1435,7 @@ export function Holdings() {
       qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
       qc.invalidateQueries({ queryKey: ['holdings-tzzb-status'] })
       if (res.ok) toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
-      else {
-        // 失败 → 后端已清无效 Cookie; 打开配置对话框让用户重新输入
-        setShowCookieDialog(true)
-        toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
-      }
+      else toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
       return res.ok
     } catch (e) {
       toast(e instanceof Error ? e.message : '同步失败', 'error')

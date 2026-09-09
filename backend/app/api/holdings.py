@@ -380,6 +380,20 @@ def tzzb_set_cookie(req: dict):
     return {"ok": True, "cookie_set": bool(cfg.get("cookie"))}
 
 
+@router.get("/tzzb/debug")
+def tzzb_debug():
+    from app.services import tzzb
+    return tzzb.debug_cookie_format()
+
+
+@router.post("/tzzb/open-login")
+def tzzb_open_login():
+    """打开专用 Chrome 登录窗口 (用户登录一次, 配置目录持久记住登录态)。"""
+    from app.services import tzzb
+
+    return tzzb.open_login_window()
+
+
 @router.post("/tzzb/autocookie")
 def tzzb_autocookie():
     """自动读取本机 Chrome 系浏览器的 10jqka Cookie (钥匙串授权 + AES 解密)。"""
@@ -412,9 +426,9 @@ def tzzb_sync(request: Request, account: str | None = Query(None)):
     except Exception as e:  # noqa: BLE001
         res = {"ok": False, "message": f"同步异常: {e}"}
     if not res.get("ok"):
-        # 失败即清 Cookie, 前端下次点击可重新配置 (避免无效凭据卡死)
+        # 失败仅标记状态 (保留 Cookie——Cookie 可能有效, 可能只是端点未命中)
         try:
-            tzzb.save_config(cookie="", last_ok=False)
+            tzzb.save_config(last_ok=False)
         except Exception:  # noqa: BLE001
             pass
     return res
