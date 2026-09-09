@@ -94,11 +94,15 @@ def get_holdings_settings() -> dict:
     """持仓模块全局设置: 汇率/押金率/基准/快照保留。"""
     d = load()
     return {
-        "hk_rate": float(d.get("holdings_hk_rate", 0.92)),        # 港币→人民币
-        "us_rate": float(d.get("holdings_us_rate", 7.2)),         # 美元→人民币
+        # 汇率默认 1.0 = 不换算 (显示券商原币实际金额); 需要折算时在设置里改或用自动获取
+        "hk_rate": float(d.get("holdings_hk_rate", 1.0)),
+        "us_rate": float(d.get("holdings_us_rate", 1.0)),
+        "hk_rate_source": d.get("holdings_hk_rate_source", "auto"),
+        "hk_rate_date": d.get("holdings_hk_rate_date"),
         "hk_deposit_rate": float(d.get("holdings_hk_deposit_rate", 0.03)),  # 港股通押金率(口径说明)
         "benchmark": d.get("holdings_benchmark", "000001.SH"),    # 收益基准指数
         "snapshot_keep": int(d.get("holdings_snapshot_keep", 0)), # 0=全部保留
+        "concentration_threshold": float(d.get("holdings_concentration_threshold", 0.4)),
     }
 
 
@@ -811,3 +815,7 @@ def set_financial_sync_time(table: str, iso_ts: str) -> None:
     times = get_financial_sync_times()
     times[table] = iso_ts
     save({"financial_sync_times": times})
+
+
+def get_holdings_concentration_threshold() -> float:
+    return float(load().get("holdings_concentration_threshold", 0.4))

@@ -1326,6 +1326,7 @@ function renderMd(text: string): React.ReactNode[] {
 function AiReportPanel({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('')
   const [status, setStatus] = useState<'running' | 'done' | 'error'>('running')
+  const [saved, setSaved] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1365,6 +1366,19 @@ function AiReportPanel({ onClose }: { onClose: () => void }) {
           <div className="text-xs text-muted py-4 text-center">正在读取持仓与近期行情，生成体检报告…</div>
         ) : null}
       </div>
+      {status === 'done' && text && (
+        <div className="px-4 py-2 border-t border-border flex items-center gap-2">
+          <button onClick={() => {
+            const rep = api.holdingsReportsSave({ date: new Date().toISOString().slice(0,10), content: text, summary: text.slice(0, 80) })
+            Promise.resolve(rep).then(() => toast('报告已保存', 'success')).catch(() => {})
+            setSaved(true)
+          }} disabled={saved}
+            className="text-[11px] text-accent hover:underline inline-flex items-center gap-1">
+            <Check className="h-3 w-3" />{saved ? '已保存' : '保存此报告'}
+          </button>
+          <span className="text-[10px] text-muted">保存在本地，可在历史报告中查看</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -1384,6 +1398,7 @@ export function Holdings() {
   const [showImport, setShowImport] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showClosed, setShowClosed] = useState(true)
+  const [closedSort, setClosedSort] = useState<{ col: number; dir: 'asc' | 'desc' }>({ col: 2, dir: 'desc' })
   const [dayDetail, setDayDetail] = useState<string | null>(null)
   const [showAi, setShowAi] = useState(false)
   const [aiKey, setAiKey] = useState(0)
@@ -1792,11 +1807,11 @@ export function Holdings() {
                       {!hiddenCols.has('change_pct') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>}
                       {!hiddenCols.has('qty') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>}
                       {!hiddenCols.has('avg_cost') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>}
-                      {!hiddenCols.has('market_value') && <td className="px-3 py-2.5 tabular-nums text-foreground">{fmtMoney(r.market_value)}</td>}
+                      {!hiddenCols.has('market_value') && <td className="px-3 py-2.5 tabular-nums text-foreground">{r.qty === 0 ? '—' : fmtMoney(r.market_value)}</td>}
                       {!hiddenCols.has('float_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.float_pnl)}`}>
-                        {fmtMoney(r.float_pnl)}<span className="text-[11px] font-normal ml-1">{fmtPct(r.float_pnl_pct)}</span>
+                        {r.qty === 0 ? '—' : fmtMoney(r.float_pnl)}{r.qty !== 0 && <span className="text-[11px] font-normal ml-1">{fmtPct(r.float_pnl_pct)}</span>}
                       </td>}
-                      {!hiddenCols.has('day_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{fmtMoney(r.day_pnl)}</td>}
+                      {!hiddenCols.has('day_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{r.qty === 0 ? '—' : fmtMoney(r.day_pnl)}</td>}
                       {!hiddenCols.has('pre_profit') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.pre_profit)}`}>{fmtMoney(r.pre_profit)}</td>}
                       {!hiddenCols.has('hold_days') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.hold_days != null ? Math.round(r.hold_days) : '—'}</td>}
                       {!hiddenCols.has('m1_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m1_rate)}`}>{fmtPct(r.m1_rate)}</td>}
@@ -1857,13 +1872,23 @@ export function Holdings() {
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="text-muted border-b border-border/60 bg-elevated/30">
-                      {['名称/代码', '成本', '已实现盈亏', '清仓时间'].map(h => (
-                        <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>
+                      {(['名称/代码', '成本', '已实现盈亏', '清仓时间'] as const).map((h, i) => (
+                        <th key={h} onClick={() => setClosedSort(cs => ({ col: i, dir: cs.col === i && cs.dir === 'asc' ? 'desc' : 'asc' }))}
+                          className="px-3 py-2 text-left font-medium cursor-pointer select-none hover:text-foreground">
+                          {h}{closedSort.col === i && <span className="ml-0.5 text-accent">{closedSort.dir === 'asc' ? '↑' : '↓'}</span>}
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {closedRows.map(r => (
+                    {[...closedRows].sort((a, b) => {
+                      const keys: (keyof HoldingRow)[] = ['name', 'avg_cost', 'realized_pnl', 'closed_at']
+                      const k = keys[closedSort.col]
+                      const va = (a[k] ?? 0) as string | number
+                      const vb = (b[k] ?? 0) as string | number
+                      const cmp = typeof va === 'string' ? va.localeCompare(vb as string) : Number(va) - Number(vb)
+                      return closedSort.dir === 'asc' ? cmp : -cmp
+                    }).map(r => (
                       <tr key={r.symbol} className="border-b border-border/40 cursor-pointer hover:bg-elevated/30"
                         onClick={() => openPreview(r.symbol, r.name || '')}>
                         <td className="px-3 py-2">

@@ -35,6 +35,7 @@ _SCHEMA = {
     # 投资账本同步的富字段
     "price": pl.Float64,
     "change_pct": pl.Float64,
+    "source": pl.Utf8,
     "hold_days": pl.Float64,
     "position_rate": pl.Float64,
     "pre_profit": pl.Float64,
@@ -242,9 +243,15 @@ def get(account_id: str, symbol: str) -> dict[str, Any] | None:
 
 def upsert(account_id: str, symbol: str, qty: float,
            available: float | None = None, avg_cost: float | None = None,
-           extras: dict | None = None) -> list[dict]:
+           extras: dict | None = None, source: str = "tzzb") -> list[dict]:
     df = _read(account_id)
-    df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
+    # 手动来源 (manual/screenshot) 的行不被 tzzb 同步覆盖或删除
+    if source == "tzzb":
+        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")
+                         & (pl.col("source") == "manual")))
+    else:
+        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")
+                         & (pl.col("source") == source)))
     row = {
         "symbol": symbol,
         "qty": float(qty),
@@ -254,6 +261,7 @@ def upsert(account_id: str, symbol: str, qty: float,
         "status": "open",
         "closed_at": None,
         "realized_pnl": None,
+        "source": source,
     }
     for k, v in (extras or {}).items():
         if k in _SCHEMA and k not in row:
@@ -313,6 +321,24 @@ def remove(account_id: str, symbol: str) -> list[dict]:
     df = _read(account_id).filter(pl.col("symbol") != symbol)
     _write(account_id, df)
     return list_all(account_id, include_closed=True)
+
+
+def remove_stale_tzzb(account_id: str, valid_symbols: set[str]) -> list[str]:
+    """同步清理: 仅删除 tzzb 来源且不在最新账本持仓中的 open 行 (保护手动/截图来源)。"""
+    df = _read(account_id)
+    stale = df.filter(
+        (pl.col("status") != "closed")
+        & (pl.col("source") == "tzzb")
+        & ~pl.col("symbol").is_in(list(valid_symbols))
+    )
+    names = stale["symbol"].to_list()
+    if names:
+        df = df.filter(
+            ~((pl.col("status") != "closed") & (pl.col("source") == "tzzb")
+              & pl.col("symbol").is_in(names))
+        )
+        _write(account_id, df)
+    return names
 
 
 def reset(account_id: str, include_portfolio: bool = True) -> int:

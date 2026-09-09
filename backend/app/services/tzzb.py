@@ -470,6 +470,16 @@ def fetch_hk_rate() -> dict | None:
         if rate:
             save_config(hk_rate=rate, hk_rate_before=before,
                         hk_rate_date=datetime.now(HK_TZ).date().isoformat())
+            # 自动值写入 preferences (手动覆盖值存于 holdings_hk_rate_manual 时优先)
+            try:
+                from app.services import preferences
+
+                if preferences.load().get("holdings_hk_rate_source", "auto") == "auto":
+                    preferences.save({"holdings_hk_rate": rate,
+                                      "holdings_hk_rate_source": "auto",
+                                      "holdings_hk_rate_date": datetime.now(HK_TZ).date().isoformat()})
+            except Exception:  # noqa: BLE001
+                pass
             return {"rate": rate, "before": before}
     except Exception as e:  # noqa: BLE001
         logger.warning("hk_rate fetch failed: %s", e)
@@ -616,7 +626,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
                 "m12_rate": _f(p.get("m12_rate")),
             }
             if qty > 0:
-                holdings_svc.upsert(acc_id, symbol, qty, qty, cost, extras)
+                holdings_svc.upsert(acc_id, symbol, qty, qty, cost, extras, source="tzzb")
             else:
                 # 已清仓 (数量 0): 记为 closed, 保留成本与已实现盈亏未知
                 h = holdings_svc.get(acc_id, symbol)
@@ -629,13 +639,10 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
                 wl.add(symbol)
             holdings_rows.append({"symbol": symbol, "qty": qty, "available": qty,
                                   "avg_cost": cost or None})
-        # 清理失效行: 该账户下不在最新账本持仓中的 open 行 (错误符号/已移除)
+        # 清理失效行: 仅删除 tzzb 来源的失效行 (手动/截图来源受保护)
         valid = {r["symbol"] for r in holdings_rows}
-        df_acc = holdings_svc._read(acc_id)
-        stale = [x for x in df_acc.filter(pl.col("status") != "closed")["symbol"].to_list() if x not in valid]
+        stale = holdings_svc.remove_stale_tzzb(acc_id, valid)
         if stale:
-            for sym in stale:
-                holdings_svc.remove(acc_id, sym)
             logger.info("tzzb sync 清理失效持仓 %s: %s", raw_name, stale)
         holdings_svc.set_portfolio(acc_id, cash=cash)
         holdings_svc.save_snapshot(acc_id, today, cash=cash)

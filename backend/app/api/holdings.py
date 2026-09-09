@@ -64,6 +64,7 @@ class SettingsRequest(BaseModel):
     hk_deposit_rate: float | None = None
     benchmark: str | None = None
     snapshot_keep: int | None = None
+    concentration_threshold: float | None = None
 
 
 def _acc(request: Request, account: str | None) -> str:
@@ -469,6 +470,8 @@ def update_settings(req: SettingsRequest):
         updates["holdings_benchmark"] = req.benchmark
     if req.snapshot_keep is not None:
         updates["holdings_snapshot_keep"] = max(0, int(req.snapshot_keep))
+    if req.concentration_threshold is not None:
+        updates["holdings_concentration_threshold"] = min(1.0, max(0.05, float(req.concentration_threshold)))
     if updates:
         preferences.save(updates)
     return preferences.get_holdings_settings()
@@ -664,6 +667,24 @@ def export_pnl_csv(request: Request, account: str | None = Query(None)):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=pnl_daily.csv"},
     )
+
+
+@router.get("/bg-tasks")
+def bg_tasks_status():
+    """后台任务心跳状态 (设置页指示灯)。"""
+    from app.services import tzzb
+
+    cfg = tzzb.load_config()
+    return {
+        "tasks": [
+            {"name": "投资账本定时同步", "key": "tzzb-sync",
+             "running": bool(tzzb._sync_thread and tzzb._sync_thread.is_alive()),
+             "last_run": cfg.get("last_sync"), "ok": cfg.get("last_ok")},
+            {"name": "港股价格自动刷新", "key": "tzzb-hk",
+             "running": bool(tzzb._hk_thread and tzzb._hk_thread.is_alive()),
+             "last_run": None, "ok": None},
+        ],
+    }
 
 
 @router.get("/tzzb/hk-rate")

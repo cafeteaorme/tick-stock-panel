@@ -1504,6 +1504,12 @@ export const api = {
     request<{ symbol: string; events: { date: string; type: string; price: number; qty: number }[]; cost?: number | null }>(
       `/api/holdings/${encodeURIComponent(symbol)}/trades${account ? `?account=${encodeURIComponent(account)}` : ''}`,
     ),
+  holdingsReportsList: () =>
+    request<{ reports: { id: string; date: string; content: string; summary?: string | null; saved_at: string }[] }>('/api/holdings/reports'),
+  holdingsReportsSave: (r: { date: string; content: string; summary?: string }) =>
+    request<{ id: string }>('/api/holdings/reports', { method: 'POST', body: JSON.stringify(r) }),
+  holdingsReportsDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/holdings/reports/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   holdingsHeldSymbols: () =>
     request<{ symbols: string[] }>('/api/holdings/held-symbols'),
   holdingsList: (includeClosed = false, account?: string) =>
