@@ -978,8 +978,9 @@ async def analyze_holdings(request: Request, account: str | None = Query(None)):
 
     summary_data = summary(request, account)
     rows = holdings_service.list_all(_acc(request, account))
+    rates = _rates()
     symbols = [r["symbol"] for r in rows]
-    enriched = _enrich_rows(rows, _rates(), request.app.state.repo.get_name_map(symbols),
+    enriched = _enrich_rows(rows, rates, request.app.state.repo.get_name_map(symbols),
                             _market_rows(request, symbols, rates))
 
     risk_brief = []

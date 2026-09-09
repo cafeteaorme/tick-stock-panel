@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { cnSignal } from '@/lib/signals'
 import { StockPanel, getDefaultRange } from '@/components/StockPanel'
+import { HourlyCandles } from '@/components/HourlyCandles'
 import { DatePicker } from '@/components/DatePicker'
 import { RuleEditor } from '@/components/monitor/RuleEditor'
 import { usePreferences, useQuoteStatus } from '@/lib/useSharedQueries'
@@ -42,6 +43,8 @@ function boardTag(symbol: string): { label: string; color: string } | null {
 
 export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers }: Props & { markers?: any[] }) {
   const [showIntraday, setShowIntraday] = useState(false)
+  const [view60m, setView60m] = useState(false)
+  const [viewMode5, setViewMode5] = useState(false)
   const [dateRange, setDateRange] = useState(getDefaultRange)
   const [showMonitorEditor, setShowMonitorEditor] = useState(false)
   const qc = useQueryClient()
@@ -159,6 +162,14 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
 
               <div className="flex items-center gap-1.5">
                 {/* 日期范围快捷 */}
+                <button
+                  onClick={() => { setView60m(false); setViewMode5(true); const e = new Date(); const s2 = new Date(); s2.setDate(s2.getDate() - 6); setDateRange({ start: s2.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }); setShowIntraday(false) }}
+                  className={`h-6 px-1.5 rounded text-[11px] transition-colors cursor-pointer border border-transparent ${viewMode5 && !view60m ? 'bg-accent/20 text-accent font-medium border-accent/30' : 'text-muted hover:text-foreground hover:bg-elevated'}`}
+                >5日</button>
+                <button
+                  onClick={() => setView60m(v => !v)}
+                  className={`h-6 px-1.5 rounded text-[11px] transition-colors cursor-pointer border border-transparent ${view60m ? 'bg-accent/20 text-accent font-medium border-accent/30' : 'text-muted hover:text-foreground hover:bg-elevated'}`}
+                >60分</button>
                 {PRESETS.map(p => {
                   const now = new Date()
                   const s = new Date(now)
@@ -277,6 +288,9 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
 
             {/* K 线内容 */}
             <div className="flex-1 overflow-auto p-4">
+              {view60m ? (
+                <HourlyCandles symbol={symbol} height={420} />
+              ) : (
               <StockPanel
                 symbol={symbol}
                 height={420}
@@ -289,6 +303,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                 onToggleWatchlist={() => toggleWatchlist.mutate()}
                 refetchIntervalMs={intradayRefetchMs}
               />
+              )}
             </div>
 
             {/* 加监控编辑器弹层 */}

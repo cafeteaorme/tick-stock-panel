@@ -1662,12 +1662,6 @@ export function Holdings() {
           title="刷新投资账本数据">
           <RefreshCw className={`h-4 w-4 ${tzzbSyncing ? 'animate-spin' : ''}`} />
         </button>
-        <button
-          onClick={() => { setShowAi(true); setAiKey(k => k + 1) }}
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn border border-violet-500/40 bg-violet-500/10 text-violet-400 text-xs font-medium hover:bg-violet-500/20"
-        >
-          <Sparkles className="h-3.5 w-3.5" />AI 分析
-        </button>
         <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground border border-border"><Camera className="h-3.5 w-3.5" />截图导入</button>
         <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90"><Plus className="h-3.5 w-3.5" />手动添加</button>
       </div>
@@ -1702,6 +1696,12 @@ export function Holdings() {
             <TrendingUp className="h-4 w-4 text-accent" />
             <span className="text-sm font-semibold text-foreground">持仓明细</span>
             <span className="text-[10px] text-muted">点列名排序 · 点行查看个股</span>
+            <button
+              onClick={() => { setShowAi(true); setAiKey(k => k + 1) }}
+              className="ml-2 inline-flex items-center gap-1 px-2 py-1 rounded-btn border border-violet-500/40 bg-violet-500/10 text-violet-400 text-[11px] font-medium hover:bg-violet-500/20"
+            >
+              <Sparkles className="h-3 w-3" />AI 分析
+            </button>
             <div className="flex-1" />
             <div className="relative">
               <button onClick={() => setShowColMenu(v => !v)} className="text-[11px] text-secondary hover:text-foreground">
@@ -1838,9 +1838,13 @@ export function Holdings() {
                       <tr key={r.symbol} className="border-b border-border/40 cursor-pointer hover:bg-elevated/30"
                         onClick={() => openPreview(r.symbol, r.name || '')}>
                         <td className="px-3 py-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-foreground font-medium whitespace-nowrap">{r.name || '—'}</span>
-                            <span className="font-mono text-muted text-xs shrink-0">{r.symbol}</span>
+                          <div className="flex items-center gap-1.5">
+                            {(() => {
+                              const b = REGION_BADGE[r.region ?? (r.symbol.endsWith('.HK') ? 'HK' : r.symbol.endsWith('.US') ? 'US' : 'CN')]
+                              return b ? <span className={`px-1 py-px rounded text-[9px] font-bold border ${b.cls}`}>{b.label}</span> : null
+                            })()}
+                            <span className="text-foreground font-medium">{r.name || '—'}</span>
+                            <span className="font-mono text-muted text-xs">{r.symbol}</span>
                           </div>
                         </td>
                         <td className="px-3 py-2 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
