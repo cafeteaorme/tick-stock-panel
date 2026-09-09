@@ -647,3 +647,36 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
                 last_result=f"同步 {len(synced_accounts)} 账户 {total_positions} 条持仓", last_ok=True)
     return {"ok": True, "message": f"同步成功：{len(synced_accounts)} 个账户，共 {total_positions} 条持仓",
             "accounts": synced_accounts}
+
+
+# ---------------------------------------------------------------- AI 报告持久化
+
+
+def _reports_path() -> Path:
+    p = settings.data_dir / "user_data" / "tzzb_reports.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def list_reports() -> list[dict]:
+    try:
+        obj = json.loads(_reports_path().read_text("utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted(obj.get("reports") or [], key=lambda r: r.get("saved_at", ""), reverse=True)
+
+
+def save_report(date: str, content: str, summary: str | None = None) -> dict:
+    rep = {"id": f"r_{int(datetime.utcnow().timestamp()*1000)}", "date": date,
+           "content": content, "summary": summary,
+           "saved_at": datetime.utcnow().isoformat(timespec="seconds")}
+    obj = {"reports": list_reports()}
+    obj["reports"].append(rep)
+    _reports_path().write_text(json.dumps(obj, ensure_ascii=False, indent=1), "utf-8")
+    return rep
+
+
+def delete_report(report_id: str) -> dict:
+    obj = {"reports": [r for r in list_reports() if r.get("id") != report_id]}
+    _reports_path().write_text(json.dumps(obj, ensure_ascii=False), "utf-8")
+    return {"ok": True}

@@ -584,6 +584,34 @@ def tzzb_history_data():
         return {"cached": False}
 
 
+class SaveReportRequest(BaseModel):
+    """保存一份 AI 组合体检报告。"""
+    date: str
+    content: str
+    summary: str | None = None
+
+
+@router.get("/reports")
+def list_reports():
+    from app.services import tzzb
+
+    return tzzb.list_reports()
+
+
+@router.post("/reports")
+def save_report(req: SaveReportRequest):
+    from app.services import tzzb
+
+    return tzzb.save_report(req.date, req.content, req.summary)
+
+
+@router.delete("/reports/{report_id}")
+def delete_report(report_id: str):
+    from app.services import tzzb
+
+    return tzzb.delete_report(report_id)
+
+
 @router.get("/export/holdings.csv")
 def export_holdings_csv(request: Request, account: str | None = Query(None)):
     """持仓明细导出 CSV (UTF-8 BOM, Excel 兼容)。"""
