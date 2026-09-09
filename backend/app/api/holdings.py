@@ -139,8 +139,27 @@ def _enrich_rows(request: Request, rows: list[dict], rates: dict) -> list[dict]:
 
 
 @router.get("/accounts")
-def accounts():
-    return holdings_service.list_accounts()
+def accounts(request: Request):
+    """账户列表, 附每账户当日盈亏 (页签展示用)。"""
+    rates = _rates()
+    obj = holdings_service.list_accounts()
+    out = []
+    for a in obj["accounts"]:
+        acc_id = a["id"]
+        rows = holdings_service.list_all(acc_id)
+        enriched = _enrich_rows(request, rows, rates)
+        day_pnl = sum(r["day_pnl"] or 0 for r in enriched)
+        market_value = sum(r["market_value"] or 0 for r in enriched)
+        port = holdings_service.get_portfolio(acc_id)
+        base = market_value - day_pnl if (market_value - day_pnl) else None
+        out.append({
+            **a,
+            "positions": len(enriched),
+            "day_pnl": round(day_pnl, 2),
+            "day_pnl_pct": round(day_pnl / base, 6) if base else None,
+            "active": acc_id == obj.get("active"),
+        })
+    return {"accounts": out, "active": obj.get("active")}
 
 
 @router.post("/accounts")
@@ -228,14 +247,16 @@ def summary(request: Request, account: str | None = Query(None)):
 
 
 @router.put("/portfolio")
-def update_portfolio(req: PortfolioRequest, account: str | None = Query(None)):
+def update_portfolio(req: PortfolioRequest, request: Request, account: str | None = Query(None)):
     return holdings_service.set_portfolio(_acc(request, account), req.initial_cap, req.cash, req.withdrawals)
 
 
 @router.post("/reset")
-def reset_data(req: ResetRequest, account: str | None = Query(None)):
-    """重置当前账户: 清空持仓+快照 (可选资金设置)。"""
-    acc = _acc(request, account)
+def reset_data(req: ResetRequest | None = None, account: str | None = Query(None)):
+    """重置当前账户: 清空持仓+快照 (可选资金设置)。body 可省略。"""
+    if req is None:
+        req = ResetRequest()
+    acc = holdings_service.resolve_account(account)
     removed = holdings_service.reset(acc, include_portfolio=req.include_portfolio)
     return {"account": acc, "removed": removed}
 
@@ -326,6 +347,49 @@ def sell_holding(symbol: str, req: SellRequest, account: str | None = Query(None
 @router.delete("/{symbol}")
 def remove_holding(symbol: str, account: str | None = Query(None)):
     return {"rows": holdings_service.remove(_acc(request, account), symbol)}
+
+
+# ---------------------------------------------------------------- 投资账本同步 (tzzb)
+
+
+@router.get("/tzzb/status")
+def tzzb_status():
+    from app.services import tzzb
+
+    cfg = tzzb.load_config()
+    return {
+        "cookie_set": bool(cfg.get("cookie")),
+        "endpoint": cfg.get("endpoint"),
+        "user_name": cfg.get("user_name"),
+        "last_sync": cfg.get("last_sync"),
+        "last_result": cfg.get("last_result"),
+    }
+
+
+@router.put("/tzzb/cookie")
+def tzzb_set_cookie(req: dict):
+    from app.services import tzzb
+
+    cookie = str(req.get("cookie") or "").strip()
+    if not cookie:
+        raise HTTPException(400, "Cookie 不能为空")
+    if "v=" not in cookie and "hexin" not in cookie.lower() and "=" not in cookie:
+        raise HTTPException(400, "Cookie 格式不像登录凭据, 请复制浏览器里完整的 Cookie")
+    cfg = tzzb.save_config(cookie=cookie)
+    return {"ok": True, "cookie_set": bool(cfg.get("cookie"))}
+
+
+@router.post("/tzzb/sync")
+def tzzb_sync(request: Request, account: str | None = Query(None)):
+    """从投资账本拉取数据 (点击「投资账本导入」/「刷新」按钮)。成功/失败都返回 message 供 toast。"""
+    from app.services import tzzb
+
+    acc = _acc(request, account)
+    try:
+        res = tzzb.sync(acc)
+    except Exception as e:  # noqa: BLE001
+        res = {"ok": False, "message": f"同步异常: {e}"}
+    return res
 
 
 # ---------------------------------------------------------------- 收益序列

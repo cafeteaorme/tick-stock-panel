@@ -292,6 +292,12 @@ export interface HoldingRow {
   day_pnl?: number | null
 }
 
+export interface AccountInfo {
+  id: string
+  name: string
+  created_at: string
+}
+
 export interface HoldingsSummary {
   account: string
   initial_cap: number
@@ -1497,7 +1503,15 @@ export const api = {
     ),
   // ---- 多账户 ----
   holdingsAccounts: () =>
-    request<{ accounts: { id: string; name: string; created_at: string }[]; active: string }>('/api/holdings/accounts'),
+    request<{ accounts: (AccountInfo & { day_pnl?: number; day_pnl_pct?: number | null; positions?: number })[]; active: string }>('/api/holdings/accounts'),
+  holdingsTzzbStatus: () =>
+    request<{ cookie_set: boolean; endpoint?: string; user_name?: string; last_sync?: string | null; last_result?: string }>('/api/holdings/tzzb/status'),
+  holdingsTzzbSetCookie: (cookie: string) =>
+    request<{ ok: boolean }>('/api/holdings/tzzb/cookie', { method: 'PUT', body: JSON.stringify({ cookie }) }),
+  holdingsTzzbSync: (account?: string) =>
+    request<{ ok: boolean; message: string; endpoint?: string; user_name?: string; imported?: number }>(
+      `/api/holdings/tzzb/sync${account ? `?account=${encodeURIComponent(account)}` : ''}`, { method: 'POST' },
+    ),
   holdingsCreateAccount: (name: string) =>
     request<{ id: string; name: string }>('/api/holdings/accounts', { method: 'POST', body: JSON.stringify({ name }) }),
   holdingsSetActiveAccount: (account: string) =>
@@ -1514,7 +1528,7 @@ export const api = {
   holdingsReset: (account: string, includePortfolio = true) =>
     request<{ account: string; removed: number }>(
       `/api/holdings/reset?account=${encodeURIComponent(account)}&include_portfolio=${includePortfolio}`,
-      { method: 'POST' },
+      { method: 'POST', body: JSON.stringify({}) },
     ),
   holdingsImport: (items: { symbol: string; qty: number; available?: number; cost?: number }[], date?: string, cash?: number) =>
     request<{ imported: number; date: string; snapshot: boolean }>('/api/holdings/import', {

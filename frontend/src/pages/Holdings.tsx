@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Briefcase, CalendarDays, Camera, ChevronDown, Loader2, Pencil, PieChart as PieIcon,
+  BookMarked, Briefcase, CalendarDays, Camera, ChevronDown, Loader2, Pencil, PieChart as PieIcon,
   Plus, RefreshCw, Settings as SettingsIcon, Sparkles, TrendingUp, Trash2, Wallet, X,
 } from 'lucide-react'
 import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
@@ -574,7 +574,7 @@ function ShotSummaryBlock({
   )
 }
 
-function HoldingsSettingsDialog({ accountName, onClose }: { accountName: string; onClose: () => void }) {
+function HoldingsSettingsDialog({ accountId, accountName, onClose }: { accountId: string; accountName: string; onClose: () => void }) {
   const qc = useQueryClient()
   const settings = useQuery({ queryKey: ['holdings-settings'], queryFn: api.holdingsSettings })
   const [hkRate, setHkRate] = useState('')
@@ -611,7 +611,7 @@ function HoldingsSettingsDialog({ accountName, onClose }: { accountName: string;
   })
 
   const reset = useMutation({
-    mutationFn: () => api.holdingsReset(accountName === '__all__' ? 'default' : accountName, true),
+    mutationFn: () => api.holdingsReset(accountId, true),
     onSuccess: (res) => {
       setConfirmReset(false)
       refreshHoldingsCaches(qc)
@@ -1307,6 +1307,32 @@ export function Holdings() {
     else { setSortKey(k); setSortDir(k === 'name' ? 'asc' : 'desc') }
   }
 
+  // 投资账本同步 (导入 + 刷新共用; 成功/失败都 toast)
+  const [tzzbSyncing, setTzzbSyncing] = useState(false)
+  const runTzzbSync = async (isRefresh = false) => {
+    setTzzbSyncing(true)
+    try {
+      const st = await api.holdingsTzzbStatus().catch(() => null)
+      if (!st?.cookie_set) {
+        const cookie = window.prompt(
+          '首次使用：请先在浏览器登录 tzzb.10jqka.com.cn（同花顺投资账本）\n然后 F12 → Network → 任意请求 → 复制整段 Cookie 粘贴到这里',
+          '',
+        )
+        if (!cookie?.trim()) { toast('已取消：未配置 Cookie', 'error'); return }
+        await api.holdingsTzzbSetCookie(cookie.trim())
+      }
+      const res = await api.holdingsTzzbSync(activeAcc || undefined)
+      refreshAll()
+      qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+      if (res.ok) toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
+      else toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '同步失败', 'error')
+    } finally {
+      setTzzbSyncing(false)
+    }
+  }
+
   // 整页拖拽截图 → 自动识别导入
   const [dragOver, setDragOver] = useState(false)
   const [dropImages, setDropImages] = useState<PickedImage[] | undefined>(undefined)
@@ -1347,16 +1373,53 @@ export function Holdings() {
         <h1 className="text-base font-bold text-foreground">我的持仓</h1>
         <span className="text-xs text-muted">{rows.length} 只</span>
         <div className="flex-1" />
-        <select
-          value={activeAcc}
-          onChange={e => { setActiveAcc(e.target.value); refreshAll() }}
-          className="h-7 px-2 rounded-btn bg-elevated border border-border text-xs text-foreground focus:outline-none focus:border-accent/50"
-          title="切换账户"
-        >
-          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
+        {/* 账户页签: 名称 + 当日盈亏 */}
+        <div className="flex items-center gap-1 p-0.5 rounded-btn bg-elevated">
+          {accounts.map(a => {
+            const active = a.id === activeAcc
+            return (
+              <button key={a.id}
+                onClick={() => { setActiveAcc(a.id); refreshAll() }}
+                className={`px-2.5 py-1 rounded-[6px] text-xs transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
+                title={`${a.name} · ${a.positions ?? 0} 只持仓`}>
+                {a.name}
+                {(a.day_pnl != null) && (
+                  <span className={`ml-1 tabular-nums ${pnlColor(a.day_pnl)}`}>
+                    {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[9px]"> {fmtPct(a.day_pnl_pct)}</span>}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          <button
+            onClick={() => {
+              const name = window.prompt('新账户名称（如「港美股」「打新」）')
+              if (!name?.trim()) return
+              api.holdingsCreateAccount(name.trim()).then(acc => {
+                qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+                setActiveAcc(acc.id)
+                toast(`账户「${acc.name}」已创建`, 'success')
+              }).catch(() => toast('创建失败', 'error'))
+            }}
+            className="px-1.5 py-1 rounded-[6px] text-xs text-muted hover:text-accent"
+            title="新建账户"
+          >+</button>
+        </div>
         <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated" title="持仓设置">
           <SettingsIcon className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => void runTzzbSync()}
+          disabled={tzzbSyncing}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn border border-rose-500/40 bg-rose-500/10 text-rose-400 text-xs font-medium hover:bg-rose-500/20 disabled:opacity-40"
+          title="从同花顺投资账本拉取持仓 (需在设置里配置 Cookie)"
+        >
+          <BookMarked className="h-3.5 w-3.5" />投资账本导入
+        </button>
+        <button onClick={() => void runTzzbSync(true)} disabled={tzzbSyncing}
+          className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated disabled:opacity-40"
+          title="刷新投资账本数据">
+          <RefreshCw className={`h-4 w-4 ${tzzbSyncing ? 'animate-spin' : ''}`} />
         </button>
         <button
           onClick={() => { setShowAi(true); setAiKey(k => k + 1) }}
@@ -1520,6 +1583,7 @@ export function Holdings() {
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}
       {showSettings && summary?.data && (
         <HoldingsSettingsDialog
+          accountId={activeAcc}
           accountName={accounts.find(a => a.id === activeAcc)?.name || activeAcc}
           onClose={() => setShowSettings(false)}
         />
