@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  BookMarked, Briefcase, CalendarDays, Camera, Check, ChevronDown, ExternalLink, Loader2, Pencil, PieChart as PieIcon,
+  BookMarked, Briefcase, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Loader2, Pencil, PieChart as PieIcon,
   Plus, RefreshCw, Settings as SettingsIcon, Sparkles, TrendingUp, Trash2, X,
 } from 'lucide-react'
 import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
@@ -211,15 +211,13 @@ function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: string; 
   return (
     <div className={fillHeight ? 'flex flex-col h-full min-h-0' : ''}>
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-accent" />
-          <span className="text-sm font-semibold text-foreground">{month.replace('-', ' 年 ')} 月</span>
-          <span className={`text-xs tabular-nums font-medium ${pnlColor(monthPnl)}`}>{fmtMoney(monthPnl)}</span>
+        <div className="flex items-center gap-1.5">
+          {/* 年份由外层切换器统一控制, 此处只显示月份, 避免重复 */}
+          <button onClick={() => shiftMonth(-1)} className="p-1 rounded-btn text-secondary hover:bg-elevated hover:text-foreground" title="上一月"><ChevronLeft className="h-4 w-4" /></button>
+          <span className="text-base font-bold text-foreground tabular-nums px-1">{Number(month.split('-')[1])} 月</span>
+          <button onClick={() => shiftMonth(1)} className="p-1 rounded-btn text-secondary hover:bg-elevated hover:text-foreground" title="下一月"><ChevronRight className="h-4 w-4" /></button>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => shiftMonth(-1)} className="p-1 rounded-btn text-secondary hover:bg-elevated rotate-90"><ChevronDown className="h-4 w-4" /></button>
-          <button onClick={() => shiftMonth(1)} className="p-1 rounded-btn text-secondary hover:bg-elevated -rotate-90"><ChevronDown className="h-4 w-4" /></button>
-        </div>
+        <span className={`text-sm tabular-nums font-semibold ${pnlColor(monthPnl)}`}>{fmtMoney(monthPnl)}</span>
       </div>
       <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-muted mb-1">
         {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}
