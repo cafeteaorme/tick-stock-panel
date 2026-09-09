@@ -159,6 +159,13 @@ export function useQuoteStream(
         if (_focusSymbol) {
           qc.invalidateQueries({ queryKey: ['kline', _focusSymbol] })
         }
+        // 我的持仓: SSE 推送驱动行情刷新 (列表/汇总均为毫秒级轻查询, 现价/涨跌/当日盈亏即时更新;
+        // pnl/benchmark 等重查询仍走 60s 轮询, 不在此失效)
+        if (!pages || pages['holdings'] !== false) {
+          qc.invalidateQueries({ queryKey: ['holdings'] })
+          qc.invalidateQueries({ queryKey: ['holdings-summary'] })
+          qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+        }
       })
 
       es.addEventListener('strategy_results_updated', () => {

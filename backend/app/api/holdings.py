@@ -297,11 +297,13 @@ def accounts(request: Request):
         base = market_value - day_pnl if (market_value - day_pnl) else None
         tzzb_count = sum(1 for r in rows
                          if r.get("status") != "closed" and r.get("source") == "tzzb")
+        # 行情未就绪 (冷缓存) 时返回 null, 前端显示「…」而非误导性的 0
+        has_mkt = any(r.get("price") is not None for r in enriched)
         out.append({
             **a,
             "positions": len(enriched),
-            "day_pnl": round(day_pnl, 2),
-            "day_pnl_pct": round(day_pnl / base, 6) if base else None,
+            "day_pnl": round(day_pnl, 2) if has_mkt else None,
+            "day_pnl_pct": round(day_pnl / base, 6) if (base and has_mkt) else None,
             "tzzb_count": tzzb_count,
             "active": acc_id == obj.get("active"),
         })
@@ -576,9 +578,7 @@ def tzzb_clear_cookie():
 
 @router.get("/tzzb/history-data")
 def tzzb_history_data():
-    """缓存的账本历史收益 (月/年权威值)。"""
-    from pathlib import Path
-
+    """缓存的账本历史收益 (月/年权威值 + 累计曲线 + 出入金)。"""
     from app.config import settings
     from app.services import tzzb
 
@@ -587,7 +587,11 @@ def tzzb_history_data():
         return {"cached": False}
     try:
         obj = json.loads(p.read_text("utf-8"))
-        return {"cached": bool(obj.get("ok")), **obj}
+        out = {"cached": bool(obj.get("ok")), **obj}
+        # 出入金来自成交缓存 (best-effort)
+        tc = tzzb.load_trades_cache()
+        out["bank"] = tc.get("bank") or []
+        return out
     except Exception:  # noqa: BLE001
         return {"cached": False}
 
@@ -967,12 +971,118 @@ def benchmark(
     }
 
 
+@router.get("/tzzb/trades")
+def tzzb_trades(symbol: str | None = Query(None)):
+    """缓存的账本真实成交 (可按 symbol 过滤) + 状态。"""
+    from app.services import tzzb
+
+    obj = tzzb.load_trades_cache()
+    out = {"ok": bool(obj.get("ok")), "fetched_at": obj.get("fetched_at"),
+           "accounts": obj.get("accounts") or [],
+           "n_trades": len(obj.get("trades") or []),
+           "n_cleared": len(obj.get("cleared") or []),
+           "n_bank": len(obj.get("bank") or [])}
+    if symbol:
+        out["trades"] = [t for t in (obj.get("trades") or []) if t.get("symbol") == symbol]
+    return out
+
+
+@router.post("/tzzb/trades/refresh")
+def tzzb_trades_refresh():
+    """立即拉取账本真实成交 (全账户, 约 10s)。"""
+    from app.services import tzzb
+
+    try:
+        return tzzb.fetch_trades_cache()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "message": f"成交拉取失败: {e}"}
+
+
+@router.get("/tzzb/cleared-check")
+def tzzb_cleared_check(request: Request, account: str | None = Query(None)):
+    """清仓核对: 账本成交派生的清仓轮次 vs 本地已清仓行。"""
+    from app.services import tzzb as tzzb_svc
+
+    acc = _acc(request, account)
+    tc = tzzb_svc.load_trades_cache()
+    if not tc.get("ok"):
+        return {"ok": False, "message": "无成交缓存 (先刷新投资账本)"}
+    acc_obj = holdings_service.list_accounts()
+    acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), None)
+    ledger = [c for c in (tc.get("cleared") or [])
+              if acc_name and c.get("account_name") == acc_name]
+    ledger_map = {c["symbol"]: c for c in ledger}
+    local_rows = holdings_service.list_all(acc)
+    local_closed = {r["symbol"]: r for r in local_rows if r.get("status") == "closed"}
+
+    matched = [s for s in local_closed if s in ledger_map]
+    local_only = sorted(set(local_closed) - set(ledger_map))
+    ledger_only = sorted(set(ledger_map) - set(local_closed))
+    return {
+        "ok": True,
+        "account": acc_name,
+        "matched": matched,
+        "local_only": local_only,
+        "ledger_only": [
+            {"symbol": s, "name": ledger_map[s].get("name"),
+             "last_sell": ledger_map[s].get("last_sell"),
+             "profit": ledger_map[s].get("profit")}
+            for s in ledger_only
+        ],
+        "ledger": [
+            {"symbol": s, "last_sell": c.get("last_sell"), "profit": c.get("profit"),
+             "avg_cost": c.get("avg_cost"), "avg_sell": c.get("avg_sell")}
+            for s, c in ledger_map.items()
+        ],
+    }
+
+
 @router.get("/{symbol}/trades")
 def symbol_trades(request: Request, symbol: str, account: str | None = Query(None)):
-    """B/S 买卖点: 由每日持仓快照变动推导 (数量↑=B, ↓=S), 价格取当日收盘。"""
+    """B/S 买卖点: 优先账本真实成交 (逐日聚合, 含已实现盈亏), 无缓存时退回快照推算。"""
+    from app.services import tzzb as tzzb_svc
+
     acc = _acc(request, account)
-    timeline = holdings_service.snapshot_timeline(acc)
     repo = request.app.state.repo
+
+    # ---- 真实成交 (账本) ----
+    tc = tzzb_svc.load_trades_cache()
+    if tc.get("ok"):
+        acc_obj = holdings_service.list_accounts()
+        acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), None)
+        mine = [t for t in (tc.get("trades") or [])
+                if t.get("symbol") == symbol and acc_name and t.get("account_name") == acc_name]
+        if mine:
+            by_date: dict[str, dict] = {}
+            for t in mine:
+                d = by_date.setdefault(t["date"], {"bq": 0.0, "ba": 0.0, "sq": 0.0, "sa": 0.0, "p": 0.0})
+                if t.get("bs") == "B":
+                    d["bq"] += float(t.get("qty") or 0)
+                    d["ba"] += float(t.get("price") or 0) * float(t.get("qty") or 0)
+                elif t.get("bs") == "S":
+                    d["sq"] += float(t.get("qty") or 0)
+                    d["sa"] += float(t.get("price") or 0) * float(t.get("qty") or 0)
+                    d["p"] += float(t.get("profit") or 0)
+            events = []
+            for d in sorted(by_date):
+                v = by_date[d]
+                if v["bq"] >= v["sq"]:
+                    events.append({"date": d, "type": "B",
+                                   "price": round(v["ba"] / v["bq"], 3) if v["bq"] else 0,
+                                   "qty": round(v["bq"] - v["sq"], 2),
+                                   "profit": round(v["p"], 2)})
+                else:
+                    events.append({"date": d, "type": "S",
+                                   "price": round(v["sa"] / v["sq"], 3) if v["sq"] else 0,
+                                   "qty": round(v["bq"] - v["sq"], 2),
+                                   "profit": round(v["p"], 2)})
+            if events:
+                h = holdings_service.get(acc, symbol)
+                cost = float(h.get("avg_cost") or 0) if h else None
+                return {"symbol": symbol, "events": events, "cost": cost, "source": "tzzb"}
+
+    # ---- 快照推算 (回退) ----
+    timeline = holdings_service.snapshot_timeline(acc)
     end = date.today()
     start = end - timedelta(days=400)
 
@@ -1019,7 +1129,7 @@ def symbol_trades(request: Request, symbol: str, account: str | None = Query(Non
     # 成本价参考线
     h = holdings_service.get(acc, symbol)
     cost = float(h.get("avg_cost") or 0) if h else None
-    return {"symbol": symbol, "events": events, "cost": cost}
+    return {"symbol": symbol, "events": events, "cost": cost, "source": "calc"}
 
 
 # ---------------------------------------------------------------- AI 组合体检

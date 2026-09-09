@@ -15,7 +15,9 @@ import json
 import logging
 import re
 import socket
+import subprocess
 import threading
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -342,13 +344,63 @@ def _cdp_capture(page_url: str, patterns: tuple[str, ...], wait_s: float = 12) -
         ws.close()
 
 
-def _cdp_cookie() -> str:
-    import math
+def _cdp_capture_api(trigger_url: str, patterns: tuple[str, ...], wait_s: float = 15) -> list[dict]:
+    """导航到 trigger_url, 捕获页面自身发出的命中 patterns 的接口响应体。
+
+    反爬 token 由页面 JS 自己带上, 我们只旁路截获响应 → 最可靠。
+    返回 [{url, post_data, body}], body 为原始字符串。
+    """
+    import base64  # noqa: F401
+    import time as _time
+
+    import websocket
+
+    page = _ensure_tzzb_page()
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"],
+                                     timeout=int(wait_s + 15), suppress_origin=True)
+    results: list[dict] = []
+    pending: dict[str, dict] = {}   # requestId -> {url, post_data}
+    body_calls: dict[int, dict] = {}  # getResponseBody 调用 id -> entry
+    next_id = 100
     try:
-        f = float(v)
-        return f if math.isfinite(f) else None
-    except (TypeError, ValueError):
-        return None
+        ws.send(json.dumps({"id": 1, "method": "Network.enable"}))
+        ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": trigger_url}}))
+        deadline = _time.time() + wait_s
+        ws.settimeout(1.0)
+        while _time.time() < deadline:
+            try:
+                msg = json.loads(ws.recv())
+            except Exception:  # noqa: BLE001
+                continue
+            meth = msg.get("method")
+            params = msg.get("params") or {}
+            if meth == "Network.requestWillBeSent":
+                req = params.get("request") or {}
+                u = req.get("url", "")
+                if any(p in u for p in patterns):
+                    pending[params["requestId"]] = {"url": u,
+                                                    "post_data": req.get("postData") or ""}
+            elif meth == "Network.loadingFailed" and params.get("requestId") in pending:
+                pending.pop(params["requestId"], None)
+            elif meth == "Network.loadingFinished" and params.get("requestId") in pending:
+                rid = params["requestId"]
+                entry = pending.pop(rid)
+                cid = next_id
+                next_id += 1
+                body_calls[cid] = entry
+                ws.send(json.dumps({"id": cid, "method": "Network.getResponseBody",
+                                    "params": {"requestId": rid}}))
+            elif "id" in msg and msg["id"] in body_calls and "result" in msg:
+                entry = body_calls.pop(msg["id"])
+                res = msg.get("result") or {}
+                body = res.get("body") or ""
+                if res.get("base64Encoded"):
+                    body = base64.b64decode(body).decode("utf-8", "replace")
+                entry["body"] = body
+                results.append(entry)
+        return results
+    finally:
+        ws.close()
 
 
 def open_login_window() -> dict[str, Any]:
@@ -464,6 +516,98 @@ def _cdp_cookie() -> str:
         if saved:
             return saved
         raise
+
+
+def _ensure_tzzb_page(wait_s: float = 8) -> dict:
+    """确保 CDP 可达且存在 tzzb 页面, 返回该页面 target (页面上下文调用入口)。"""
+    import time as _time
+
+    if not _cdp_port_alive():
+        profile = settings.data_dir / _PROFILE_DIR
+        profile.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen([
+            "open", "-na", "Google Chrome", "--args",
+            f"--user-data-dir={profile}",
+            f"--remote-debugging-port={_CDP_PORT}",
+            "--headless=new", "--no-first-run", "about:blank",
+        ])
+        for _ in range(20):
+            _time.sleep(1)
+            if _cdp_port_alive():
+                break
+        else:
+            raise RuntimeError("无法启动 Chrome 调试端口")
+
+    def _find():
+        return next((t for t in _cdp_json("/json/list")
+                     if t.get("type") == "page" and "tzzb.10jqka.com.cn" in (t.get("url") or "")), None)
+
+    page = _find()
+    if not page:
+        _cdp_new_tab("https://tzzb.10jqka.com.cn/pc/index.html")
+        deadline = _time.time() + wait_s
+        while _time.time() < deadline:
+            _time.sleep(1)
+            page = _find()
+            if page:
+                break
+    if not page:
+        raise RuntimeError("CDP 无 tzzb 页面")
+    return page
+
+
+def _cdp_page_post(ep: str, params: dict, timeout_s: float = 20) -> dict:
+    """在专用 Chrome 的 tzzb 页面上下文里发 POST。
+
+    实测要点: 必须用相对 URL + axios 同款 Accept 头, 否则被 WAF 403
+    ("请求失败，请稍后重试")。用于 GET 探测不通的接口
+    (stock_history_query / clear_position_query 等)。
+    """
+    import time as _time
+
+    import websocket
+
+    page = _ensure_tzzb_page()
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"],
+                                     timeout=int(timeout_s + 10), suppress_origin=True)
+    body = urllib.parse.urlencode(params)
+    expr = (
+        "(async () => {"
+        "  try {"
+        f"    const r = await fetch('/caishen_httpserver/tzzb{ep}', {{"
+        "      method: 'POST',"
+        "      headers: {"
+        "        'Content-Type': 'application/x-www-form-urlencoded',"
+        "        'Accept': 'application/json, text/plain, */*'"
+        "      },"
+        f"      body: {json.dumps(body)}"
+        "    });"
+        "    return await r.text();"
+        "  } catch (e) { return JSON.stringify({error_code: 'network', error_msg: String(e)}); }"
+        "})()"
+    )
+    try:
+        ws.send(json.dumps({"id": 1, "method": "Runtime.enable"}))
+        ws.send(json.dumps({"id": 2, "method": "Runtime.evaluate",
+                            "params": {"expression": expr, "awaitPromise": True,
+                                       "returnByValue": True}}))
+        deadline = _time.time() + timeout_s
+        while _time.time() < deadline:
+            try:
+                msg = json.loads(ws.recv())
+            except Exception:  # noqa: BLE001
+                continue
+            if msg.get("id") == 2:
+                res = (msg.get("result") or {}).get("result") or {}
+                if res.get("type") != "string":
+                    raise RuntimeError(f"{ep} 页面调用失败: {json.dumps(msg.get('result'))[:200]}")
+                obj = json.loads(res["value"])
+                if str(obj.get("error_code")) != "0":
+                    raise RuntimeError(f"{ep} error_code={obj.get('error_code')} {str(obj.get('error_msg'))[:80]}")
+                return obj.get("ex_data") or {}
+        raise RuntimeError(f"{ep} 页面调用超时")
+    finally:
+        ws.close()
 
 
 def _market_suffix(market: str, code: str) -> str:
@@ -659,6 +803,13 @@ def fetch_history_cache() -> dict[str, Any]:
         "asset_trend": trend_list,
         "trading_day_info": _last_trading_day_info(),
     }
+    # 月度累计盈亏曲线 (账本权威, 全历史; 无需本金即可看复利轨迹)
+    cum = 0.0
+    curve = []
+    for k, v in sorted(monthly_acc.items()):
+        cum = round(cum + v, 2)
+        curve.append({"period": k, "pnl": v, "cum": cum})
+    payload["curve"] = curve
     _atomic_write_json(_hist_path(), payload)
     return {"ok": True, "message": f"历史收益缓存成功：{len(monthly_acc)} 个月（{fetched_months} 条记录），资产趋势 {len(trend_list)} 天"}
 
@@ -746,8 +897,196 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
 
     save_config(last_sync=datetime.utcnow().isoformat(timespec="seconds"),
                 last_result=f"同步 {len(synced_accounts)} 账户 {total_positions} 条持仓", last_ok=True)
+
+    # 成交/清仓缓存 (>12h 才刷新, 异步不阻塞同步)
+    if _trades_stale():
+        def _safe_fetch_trades():
+            try:
+                fetch_trades_cache()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("trades cache refresh failed: %s", e)
+        threading.Thread(target=_safe_fetch_trades, daemon=True).start()
+
     return {"ok": True, "message": f"同步成功：{len(synced_accounts)} 个账户，共 {total_positions} 条持仓",
             "accounts": synced_accounts}
+
+
+# ---------------------------------------------------------------- 真实成交 / 清仓 / 出入金
+
+_TRADES_NAME = "tzzb_trades.json"
+
+
+def _trades_path() -> Path:
+    return settings.data_dir / "user_data" / _TRADES_NAME
+
+
+def _trade_symbol(market_code: str, code: str) -> str:
+    """成交记录 → 本地 symbol (港 5 位/沪深北 6 位/字母码 → .US)。"""
+    code = (code or "").strip()
+    if not code:
+        return ""
+    if code.isdigit():
+        return code + _market_suffix(str(market_code or ""), code)
+    return code.upper() + ".US"
+
+
+def _norm_trade(r: dict, acc_name: str) -> dict | None:
+    code = str(r.get("stock_code") or "").strip()
+    if not code:
+        return None
+    d = str(r.get("trans_date") or "")
+    date = f"{d[:4]}-{d[4:6]}-{d[6:]}" if len(d) == 8 else ""
+    if not date:
+        return None
+    dt = str(r.get("transDateTime") or "")
+    op = str(r.get("op") or "")
+    return {
+        "account_id": str(r.get("account_id") or ""),
+        "account_name": acc_name,
+        "symbol": _trade_symbol(str(r.get("market_code") or ""), code),
+        "name": (r.get("stock_name") or "").strip(),
+        "date": date,
+        "time": dt[8:14] if len(dt) >= 14 else "",
+        "bs": "B" if op == "1" else ("S" if op == "2" else "?"),
+        "price": _f_pl(r.get("trans_price")),
+        "qty": _f_pl(r.get("trans_count")),
+        "amount": _f_pl(r.get("trans_amount")),
+        "fee": _f_pl(r.get("trans_fee")),
+        "profit": _f_pl(r.get("profit")),
+    }
+
+
+def _derive_cleared(trades: list[dict]) -> list[dict]:
+    """按 (账户, 代码) 重放成交: 数量归零即一轮完整清仓, 汇总成本/卖价/已实现。"""
+    by_key: dict[tuple[str, str], list[dict]] = {}
+    for t in trades:
+        by_key.setdefault((t["account_id"], t["symbol"]), []).append(t)
+    rounds: list[dict] = []
+    for (acc_id, symbol), ts in by_key.items():
+        qty = buy_cost = buy_qty = sell_qty = sell_amt = profit = fee = 0.0
+        first_buy: str | None = None
+        last_sell: str | None = None
+        name = ""
+        for t in sorted(ts, key=lambda x: (x["date"], x.get("time") or "")):
+            name = t.get("name") or name
+            q = float(t.get("qty") or 0)
+            amt = float(t.get("amount") or 0)
+            fee += float(t.get("fee") or 0)
+            if t["bs"] == "B":
+                qty += q
+                buy_cost += amt
+                buy_qty += q
+                if first_buy is None:
+                    first_buy = t["date"]
+            elif t["bs"] == "S":
+                qty -= q
+                sell_qty += q
+                sell_amt += amt
+                profit += float(t.get("profit") or 0)
+                last_sell = t["date"]
+                if abs(qty) < 1e-6 and buy_qty > 0:
+                    rounds.append({
+                        "account_id": acc_id, "symbol": symbol, "name": name,
+                        "first_buy": first_buy, "last_sell": last_sell,
+                        "qty": round(buy_qty, 4),
+                        "avg_cost": round(buy_cost / buy_qty, 4) if buy_qty else None,
+                        "avg_sell": round(sell_amt / sell_qty, 4) if sell_qty else None,
+                        "profit": round(profit, 2), "fee": round(fee, 2),
+                    })
+                    qty = buy_cost = buy_qty = sell_qty = sell_amt = profit = fee = 0.0
+                    first_buy = last_sell = None
+    return rounds
+
+
+def load_trades_cache() -> dict:
+    try:
+        return json.loads(_trades_path().read_text("utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def trades_status() -> dict:
+    obj = load_trades_cache()
+    return {
+        "ok": bool(obj.get("ok")),
+        "fetched_at": obj.get("fetched_at"),
+        "accounts": obj.get("accounts") or [],
+        "n_trades": len(obj.get("trades") or []),
+        "n_cleared": len(obj.get("cleared") or []),
+        "n_bank": len(obj.get("bank") or []),
+    }
+
+
+def fetch_trades_cache() -> dict[str, Any]:
+    """逐账户拉取真实成交 (页面 POST, 全量) → 派生清仓轮次 + 出入金(best-effort)。"""
+    cookie = _cdp_cookie()
+    save_config(cookie=cookie)
+    accounts_raw = _api("/caishen_fund/pc/account/v1/account_list", cookie, {})
+    brokers = (accounts_raw.get("common") or []) + (accounts_raw.get("rzrq") or [])
+    uid = _uid(cookie)
+
+    trades: list[dict] = []
+    per_acc: list[dict] = []
+    bank: list[dict] = []
+    for b in brokers:
+        fk = str(b.get("fund_key") or "")
+        if not fk:
+            continue
+        acc_name = (b.get("brokername") or b.get("manualname") or fk).strip()
+        try:
+            ex = _cdp_page_post("/caishen_fund/stock_position/v1/stock_history_query",
+                                {"userid": uid, "manualid": "", "fundkey": fk,
+                                 "rzrq_fundkey": "", "stock_code": "", "stock_account": "",
+                                 "end_date": "", "start_date": "", "from_pc": "1"})
+            raw = ex.get("list") or []
+        except Exception as e:  # noqa: BLE001
+            logger.warning("stock_history_query %s failed: %s", fk, e)
+            raw = []
+        per_acc.append({"fund_key": fk, "name": acc_name, "trades": len(raw)})
+        for r in raw:
+            t = _norm_trade(r, acc_name)
+            if t:
+                trades.append(t)
+        # 出入金 (可能为空/接口变化, 失败不阻塞)
+        try:
+            ex = _cdp_page_post("/caishen_fund/pc/asset/v1/query_bank_history",
+                                {"userid": uid, "fundkey": fk, "type": "common",
+                                 "from_pc": "1"})
+            for r in (ex.get("stock") or []):
+                r["_account"] = acc_name
+                bank.append(r)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("query_bank_history %s failed: %s", fk, e)
+
+    trades.sort(key=lambda t: (t["date"], t.get("time") or ""))
+    cleared = _derive_cleared(trades)
+    # 派生清仓轮次补账户名 (核对时与本地账户名匹配)
+    name_by_fk = {a["fund_key"]: a["name"] for a in per_acc}
+    for c in cleared:
+        c["account_name"] = name_by_fk.get(c.get("account_id") or "", "")
+    payload = {
+        "ok": any(a["trades"] > 0 for a in per_acc),
+        "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
+        "accounts": per_acc,
+        "trades": trades,
+        "cleared": cleared,
+        "bank": bank,
+    }
+    _atomic_write_json(_trades_path(), payload)
+    return {"ok": payload["ok"],
+            "message": f"成交缓存成功：{len(per_acc)} 账户 {len(trades)} 笔成交，派生清仓 {len(cleared)} 轮"}
+
+
+def _trades_stale(max_hours: float = 12.0) -> bool:
+    obj = load_trades_cache()
+    fa = str(obj.get("fetched_at") or "")
+    if not fa:
+        return True
+    try:
+        dt = datetime.fromisoformat(fa)
+        return (datetime.utcnow() - dt).total_seconds() > max_hours * 3600
+    except Exception:  # noqa: BLE001
+        return True
 
 
 # ---------------------------------------------------------------- AI 报告持久化

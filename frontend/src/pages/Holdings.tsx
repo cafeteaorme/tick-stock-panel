@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BookMarked, Briefcase, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Loader2, Pencil, PieChart as PieIcon,
@@ -301,32 +301,51 @@ function MonthlyBars({ monthly }: { monthly: { period: string; pnl: number }[] }
   return <EChart option={option} height={200} />
 }
 
-function AssetCurve({ daily, benchmark }: { daily: { date: string; asset: number }[]; benchmark: { dates: string[]; closes: number[]; name?: string } | undefined }) {
+function AssetCurve({ daily, benchmark, ledgerCum }: {
+  daily: { date: string; asset: number }[]
+  benchmark: { dates: string[]; closes: number[]; name?: string } | undefined
+  /** 账本月度累计盈亏 (权威口径): 以月末日期为点叠加 */
+  ledgerCum?: { period: string; cum: number }[]
+}) {
   const option = useMemo(() => {
     const b0 = benchmark?.closes?.[0]
+    // x 轴 = 日度日期 ∪ 账本月末日期 (账本月份可能早于本地日度数据)
+    const monthEnds = (ledgerCum ?? []).map(r => {
+      const [y, m] = r.period.split('-').map(Number)
+      const d = new Date(y, m, 0)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    })
+    const dates = [...new Set([...daily.map(r => r.date), ...monthEnds])].sort()
+    const dailyMap = new Map(daily.map(r => [r.date, r.asset]))
+    const cumMap = new Map((ledgerCum ?? []).map((r, i) => [monthEnds[i], r.cum]))
     return {
       animation: false,
       grid: { left: 60, right: 56, top: 28, bottom: 28 },
       tooltip: { trigger: 'axis', ...TOOLTIP_STYLE },
-      legend: { show: !!benchmark, top: 0, right: 0, textStyle: { fontSize: 10 }, itemWidth: 14, itemHeight: 8 },
-      xAxis: { type: 'category', data: daily.map(r => r.date.slice(5)), axisLabel: { fontSize: 9 } },
+      legend: { show: !!benchmark || !!ledgerCum?.length, top: 0, right: 0, textStyle: { fontSize: 10 }, itemWidth: 14, itemHeight: 8 },
+      xAxis: { type: 'category', data: dates.map(r => r.slice(5)), axisLabel: { fontSize: 9 } },
       yAxis: [
         { type: 'value', scale: true, axisLabel: { fontSize: 9, formatter: (v: number) => fmtMoney(v, 0) }, splitLine: { lineStyle: { color: 'rgba(128,128,140,0.15)' } } },
         { type: 'value', scale: true, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v * 100).toFixed(0)}%` }, splitLine: { show: false } },
       ],
       series: [
-        { name: '总资产', type: 'line', data: daily.map(r => r.asset), showSymbol: false, lineStyle: { width: 2, color: '#3b82f6' }, areaStyle: { color: 'rgba(59,130,246,0.12)' } },
+        { name: '总资产', type: 'line', data: dates.map(d => dailyMap.get(d) ?? null), showSymbol: false, connectNulls: true, lineStyle: { width: 2, color: '#3b82f6' }, areaStyle: { color: 'rgba(59,130,246,0.12)' } },
+        ...(ledgerCum?.length ? [{
+          name: '账本累计盈亏', type: 'line', showSymbol: true, connectNulls: true, symbolSize: 4,
+          data: dates.map(d => cumMap.get(d) ?? null),
+          lineStyle: { width: 1.5, color: '#a78bfa' }, itemStyle: { color: '#a78bfa' },
+        }] : []),
         ...(benchmark && b0 ? [{
           name: benchmark.name || '基准', type: 'line', yAxisIndex: 1, showSymbol: false,
-          data: daily.map(r => {
-            const idx = benchmark.dates.indexOf(r.date)
+          data: dates.map(d => {
+            const idx = benchmark.dates.indexOf(d)
             return idx >= 0 ? (benchmark.closes[idx] / b0 - 1) : null
           }),
           lineStyle: { width: 1.5, color: '#f59e0b', type: 'dashed' as const },
         }] : []),
       ],
     }
-  }, [daily, benchmark])
+  }, [daily, benchmark, ledgerCum])
   return <EChart option={option} height={220} />
 }
 
@@ -1323,10 +1342,71 @@ function renderMd(text: string): React.ReactNode[] {
   })
 }
 
+function BgTasksPanel({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const tasks = useQuery({ queryKey: ['holdings-bg-tasks'], queryFn: api.holdingsBgTasks, refetchInterval: 30_000 })
+  const trades = useQuery({ queryKey: ['holdings-tzzb-trades'], queryFn: api.holdingsTzzbTrades })
+  const [busy, setBusy] = useState('')
+  const run = async (label: string, fn: () => Promise<unknown>) => {
+    setBusy(label)
+    try { await fn(); toast(`${label}完成`, 'success'); qc.invalidateQueries() }
+    catch { toast(`${label}失败`, 'error') }
+    finally { setBusy('') }
+  }
+  return (
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      <div className="absolute top-14 right-4 w-80 rounded-card border border-border bg-surface shadow-xl p-4 space-y-2"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          <SettingsIcon className="h-4 w-4 text-accent" />
+          <span className="text-sm font-semibold text-foreground">后台任务</span>
+          <div className="flex-1" />
+          <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
+        </div>
+        {(tasks.data?.tasks ?? []).map(t => (
+          <div key={t.key} className="flex items-center gap-2 text-xs" title={t.ok === false ? '上次执行失败' : undefined}>
+            <span className={`w-1.5 h-1.5 rounded-full ${t.running ? 'bg-emerald-400 animate-pulse' : (t.ok === false ? 'bg-amber-400' : 'bg-muted')}`} />
+            <span className="text-secondary">{t.name}</span>
+            <div className="flex-1" />
+            <span className="text-muted tabular-nums">{t.last_run ? t.last_run.slice(5, 16).replace('T', ' ') : (t.running ? '运行中' : '—')}</span>
+          </div>
+        ))}
+        <div className="border-t border-border/60 pt-2 space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-secondary">真实成交缓存</span>
+            <span className="text-muted tabular-nums">
+              {trades.data ? `${trades.data.n_trades} 笔 · ${trades.data.fetched_at?.slice(5, 16).replace('T', ' ') ?? ''}` : '未拉取'}
+            </span>
+          </div>
+          {trades.data && (
+            <div className="text-[11px] text-muted">{trades.data.accounts.map(a => `${a.name}: ${a.trades}`).join(' · ')}</div>
+          )}
+          <div className="flex gap-2 pt-0.5">
+            <button disabled={!!busy} onClick={() => run('成交拉取', () => api.holdingsTzzbTradesRefresh())}
+              className="flex-1 px-2 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40">
+              {busy === '成交拉取' ? '拉取中…' : '立即拉取真实成交'}
+            </button>
+            <button disabled={!!busy} onClick={() => run('历史拉取', () => api.holdingsTzzbHistoryFetch())}
+              className="flex-1 px-2 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40">
+              {busy === '历史拉取' ? '拉取中…' : '立即拉取历史收益'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AiReportPanel({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('')
   const [status, setStatus] = useState<'running' | 'done' | 'error'>('running')
   const [saved, setSaved] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const reportsQ = useQuery({
+    queryKey: ['holdings-reports'],
+    queryFn: api.holdingsReportsList,
+    enabled: showHistory,
+  })
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1359,8 +1439,27 @@ function AiReportPanel({ onClose }: { onClose: () => void }) {
         {status === 'running' && <span className="text-[11px] text-accent inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />分析中…</span>}
         {status === 'error' && <span className="text-[11px] text-danger">失败</span>}
         <div className="flex-1" />
+        <button onClick={() => setShowHistory(v => !v)} className="text-[11px] text-secondary hover:text-accent">历史报告</button>
         <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
       </div>
+      {showHistory && (
+        <div className="px-4 py-2 border-b border-border max-h-40 overflow-y-auto space-y-1">
+          {(reportsQ.data?.reports ?? []).map(r => (
+            <div key={r.id} className="flex items-center gap-2 text-xs group">
+              <button className="text-secondary hover:text-accent truncate" title={r.summary || r.content.slice(0, 80)}
+                onClick={() => { setText(r.content); setStatus('done') }}>
+                {r.date} · {(r.saved_at || '').slice(11, 16)}
+              </button>
+              <div className="flex-1" />
+              <button onClick={() => api.holdingsReportsDelete(r.id).then(() => reportsQ.refetch())}
+                className="opacity-0 group-hover:opacity-100 text-muted hover:text-danger text-[10px]">删除</button>
+            </div>
+          ))}
+          {(reportsQ.data?.reports ?? []).length === 0 && (
+            <div className="text-[11px] text-muted py-1">{reportsQ.isLoading ? '加载中…' : '暂无历史报告 (生成后点「保存此报告」留存)'}</div>
+          )}
+        </div>
+      )}
       <div ref={boxRef} className="px-4 py-3 max-h-96 overflow-y-auto">
         {text ? renderMd(text) : status === 'running' ? (
           <div className="text-xs text-muted py-4 text-center">正在读取持仓与近期行情，生成体检报告…</div>
@@ -1405,20 +1504,23 @@ export function Holdings() {
   const [previewSymbol, setPreviewSymbol] = useState<string | null>(null)
   const [previewName, setPreviewName] = useState('')
   const [previewMarkers, setPreviewMarkers] = useState<any[] | undefined>(undefined)
+  const [previewMarkerSrc, setPreviewMarkerSrc] = useState<'tzzb' | 'calc' | undefined>(undefined)
   const openPreview = (sym: string, name: string) => {
     setPreviewSymbol(sym)
     setPreviewName(name)
     setPreviewMarkers(undefined)
-    // 持仓股: 拉 B/S 买卖点
+    setPreviewMarkerSrc(undefined)
+    // 持仓股: 拉 B/S 买卖点 (账本真实成交优先, 快照推算兜底)
     api.holdingsTrades(sym, activeAcc || undefined).then(d => {
       const mk = (d.events ?? []).map(ev => ({
         date: ev.date,
         kind: ev.type === 'B' ? 'buy' : 'sell',
-        // B/S 常显 + 悬浮(axis tooltip)显示买入价格
-        label: ev.type === 'B' ? `B ${ev.price}` : `S ${ev.price}`,
+        // B/S 常显 + 悬浮(axis tooltip)显示成交均价 (账本来源时含当日已实现)
+        label: ev.type === 'B' ? `B ${ev.price}` : `S ${ev.price}${ev.profit ? ` (${ev.profit > 0 ? '+' : ''}${Math.round(ev.profit)})` : ''}`,
         price: ev.price,
       }))
       setPreviewMarkers(mk.length ? mk : undefined)
+      setPreviewMarkerSrc(d.source)
     }).catch(() => {})
   }
   const [sortKey, setSortKey] = useState<SortKey>('market_value')
@@ -1495,6 +1597,12 @@ export function Holdings() {
     queryKey: ['holdings-tzzb-history-data'],
     queryFn: api.holdingsTzzbHistoryData,
   })
+  // 清仓核对 (账本成交派生 vs 本地已清仓)
+  const clearedCheck = useQuery({
+    queryKey: ['holdings-tzzb-cleared-check', activeAcc],
+    queryFn: () => api.holdingsTzzbClearedCheck(activeAcc || undefined),
+  })
+  const [showTasks, setShowTasks] = useState(false)
 
   const rows = useMemo(() => {
     const list = [...(holdings.data?.rows ?? [])]
@@ -1566,6 +1674,85 @@ export function Holdings() {
     else { setSortKey(k); setSortDir(k === 'name' ? 'asc' : 'desc') }
   }
 
+  // 列顺序 + 预设 (多套显隐+顺序方案, localStorage 持久化)
+  const DEFAULT_ORDER = sortHeaders.map(h => h.key)
+  const [colOrder, setColOrder] = useState<SortKey[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('tf-holdings-col-order') || 'null') as SortKey[] | null
+      if (Array.isArray(saved) && saved.length === DEFAULT_ORDER.length && DEFAULT_ORDER.every(k => saved.includes(k))) return saved
+    } catch { /* ignore */ }
+    return DEFAULT_ORDER
+  })
+  const saveOrder = (order: SortKey[]) => {
+    setColOrder(order)
+    localStorage.setItem('tf-holdings-col-order', JSON.stringify(order))
+  }
+  const moveCol = (k: SortKey, dir: -1 | 1) => {
+    const i = colOrder.indexOf(k)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= colOrder.length) return
+    const next = [...colOrder]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    saveOrder(next)
+  }
+  const visibleCols = useMemo(() => colOrder.filter(k => !hiddenCols.has(k)), [colOrder, hiddenCols])
+  const [presets, setPresets] = useState<Record<string, { hidden: string[]; order: SortKey[] }>>(() => {
+    try { return JSON.parse(localStorage.getItem('tf-holdings-col-presets') || '{}') } catch { return {} }
+  })
+  const [activePreset, setActivePreset] = useState<string | null>(null)
+  const persistPresets = (next: Record<string, { hidden: string[]; order: SortKey[] }>) => {
+    setPresets(next)
+    localStorage.setItem('tf-holdings-col-presets', JSON.stringify(next))
+  }
+  const savePreset = () => {
+    const name = window.prompt('预设名称 (如「全面版」「精简版」)')
+    if (!name?.trim()) return
+    persistPresets({ ...presets, [name.trim()]: { hidden: [...hiddenCols], order: colOrder } })
+    setActivePreset(name.trim())
+    toast(`预设「${name.trim()}」已保存`, 'success')
+  }
+  const applyPreset = (name: string) => {
+    const ps = presets[name]
+    if (!ps) return
+    setHiddenCols(new Set(ps.hidden))
+    localStorage.setItem('tf-holdings-hidden-cols', JSON.stringify(ps.hidden))
+    saveOrder(ps.order)
+    setActivePreset(name)
+  }
+
+  // 列内容渲染 (配合 colOrder 自定义顺序)
+  const renderCell = (key: SortKey, r: HoldingRow) => {
+    switch (key) {
+      case 'name': return (
+        <td className="px-3 py-2.5">
+          <div className="flex items-center gap-1.5">
+            {(REGION_BADGE[r.region ?? 'CN']) && <span className={`px-1 py-px rounded text-[9px] font-bold border ${REGION_BADGE[r.region ?? 'CN'].cls}`}>{REGION_BADGE[r.region ?? 'CN'].label}</span>}
+            <span className="text-foreground font-medium">{r.name || '—'}</span>
+            <span className="font-mono text-muted text-xs">{r.symbol}</span>
+          </div>
+        </td>
+      )
+      case 'price': return <td className={`px-3 py-2.5 tabular-nums font-medium ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</td>
+      case 'change_pct': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>
+      case 'qty': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>
+      case 'avg_cost': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
+      case 'market_value': return <td className="px-3 py-2.5 tabular-nums text-foreground">{r.qty === 0 ? '—' : fmtMoney(r.market_value)}</td>
+      case 'float_pnl': return (
+        <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.float_pnl)}`}>
+          {r.qty === 0 ? '—' : fmtMoney(r.float_pnl)}{r.qty !== 0 && <span className="text-[11px] font-normal ml-1">{fmtPct(r.float_pnl_pct)}</span>}
+        </td>
+      )
+      case 'day_pnl': return <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{r.qty === 0 ? '—' : fmtMoney(r.day_pnl)}</td>
+      case 'pre_profit': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.pre_profit)}`}>{fmtMoney(r.pre_profit)}</td>
+      case 'hold_days': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.hold_days != null ? Math.round(r.hold_days) : '—'}</td>
+      case 'm1_rate': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m1_rate)}`}>{fmtPct(r.m1_rate)}</td>
+      case 'm3_rate': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>
+      case 'm6_rate': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>
+      case 'm12_rate': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>
+      case 'position_rate': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>
+    }
+  }
+
   // 投资账本同步 (导入 + 刷新共用; 成功/失败都 toast)
   const [tzzbSyncing, setTzzbSyncing] = useState(false)
   const [showCookieDialog, setShowCookieDialog] = useState(false)
@@ -1582,8 +1769,15 @@ export function Holdings() {
       refreshAll()
       qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
       qc.invalidateQueries({ queryKey: ['holdings-tzzb-status'] })
-      if (res.ok) toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
-      else toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
+      if (res.ok) {
+        toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
+        // 手动刷新时异步更新真实成交缓存 (B/S 点 + 清仓核对数据源)
+        api.holdingsTzzbTradesRefresh()
+          .then(() => qc.invalidateQueries({ queryKey: ['holdings-tzzb-cleared-check'] }))
+          .catch(() => {})
+      } else {
+        toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
+      }
       return res.ok
     } catch (e) {
       toast(e instanceof Error ? e.message : '同步失败', 'error')
@@ -1658,11 +1852,11 @@ export function Holdings() {
                 title={`${a.name} · ${a.positions ?? 0} 只持仓${(a.tzzb_count ?? 0) > 0 ? ` · 账本同步 ${a.tzzb_count} 只` : ''}`}>
                 {a.name}
                 {(a.tzzb_count ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 ml-0.5 align-middle" />}
-                {(a.day_pnl != null) && (
+                {(a.day_pnl != null) ? (
                   <span className={`ml-1 tabular-nums ${pnlColor(a.day_pnl)}`}>
                     {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[9px]"> {fmtPct(a.day_pnl_pct)}</span>}
                   </span>
-                )}
+                ) : ((a.positions ?? 0) > 0 && <span className="ml-1 text-muted" title="行情加载中…">…</span>)}
               </button>
             )
           })}
@@ -1684,10 +1878,12 @@ export function Holdings() {
           <SettingsIcon className="h-4 w-4" />
         </button>
         {tzzbStatus.data && (tzzbStatus.data.last_ok ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted tabular-nums" title={`投资账本数据更新于 ${tzzbStatus.data.last_sync}`}>
+          <button onClick={() => setShowTasks(true)}
+            className="inline-flex items-center gap-1 text-[11px] text-muted tabular-nums hover:text-foreground"
+            title={`投资账本数据更新于 ${tzzbStatus.data.last_sync} · 点击查看后台任务`}>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             数据 {tzzbStatus.data.last_sync?.slice(11, 16)}
-          </span>
+          </button>
         ) : (
           <button onClick={() => void runTzzbSync()} disabled={tzzbSyncing}
             className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:underline disabled:opacity-40"
@@ -1755,16 +1951,44 @@ export function Holdings() {
                 列显示
               </button>
               {showColMenu && (
-                <div className="absolute right-0 top-full mt-1 z-30 w-40 rounded-btn border border-border bg-surface shadow-xl p-2 space-y-1">
-                  {sortHeaders.map(h => (
-                    <label key={h.key} className="flex items-center gap-2 text-xs px-1.5 py-1 rounded hover:bg-elevated cursor-pointer">
-                      <input type="checkbox"
-                        checked={!hiddenCols.has(h.key)}
-                        onChange={() => toggleCol(h.key)}
-                        className="rounded border-border" />
-                      {h.label}
-                    </label>
-                  ))}
+                <div className="absolute right-0 top-full mt-1 z-30 w-48 rounded-btn border border-border bg-surface shadow-xl p-2 space-y-0.5 max-h-[70vh] overflow-y-auto">
+                  <div className="flex items-center justify-between px-1.5 pb-1">
+                    <span className="text-[10px] text-muted">↑↓ 调整列顺序</span>
+                    <button onClick={() => { setHiddenCols(new Set()); localStorage.setItem('tf-holdings-hidden-cols', '[]') }}
+                      className="text-[10px] text-accent hover:underline">全部显示</button>
+                  </div>
+                  {colOrder.map(k => {
+                    const h = sortHeaders.find(x => x.key === k)!
+                    return (
+                      <div key={k} className="flex items-center gap-1 text-xs px-1.5 py-1 rounded hover:bg-elevated">
+                        <input type="checkbox"
+                          checked={!hiddenCols.has(k)}
+                          onChange={() => toggleCol(k)}
+                          className="rounded border-border" />
+                        <span className={`flex-1 cursor-pointer ${hiddenCols.has(k) ? 'text-muted' : ''}`}
+                          onClick={() => toggleCol(k)}>{h.label}</span>
+                        <button onClick={() => moveCol(k, -1)} className="px-0.5 text-muted hover:text-foreground" title="左移">↑</button>
+                        <button onClick={() => moveCol(k, 1)} className="px-0.5 text-muted hover:text-foreground" title="右移">↓</button>
+                      </div>
+                    )
+                  })}
+                  <div className="border-t border-border/60 mt-1 pt-1.5 px-1.5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-muted">列预设</span>
+                      <button onClick={savePreset} className="text-[10px] text-accent hover:underline">保存当前</button>
+                    </div>
+                    {Object.keys(presets).length === 0 && <div className="text-[10px] text-muted">暂无预设</div>}
+                    {Object.entries(presets).map(([name, ps]) => (
+                      <div key={name} className="flex items-center gap-1 text-xs group">
+                        <button onClick={() => applyPreset(name)}
+                          className={`flex-1 text-left truncate ${activePreset === name ? 'text-accent' : 'text-secondary hover:text-foreground'}`}>
+                          {name}{activePreset === name ? ' ✓' : ''} <span className="text-muted">({ps.order.length - ps.hidden.length} 列)</span>
+                        </button>
+                        <button onClick={() => { const next = { ...presets }; delete next[name]; persistPresets(next); if (activePreset === name) setActivePreset(null) }}
+                          className="opacity-0 group-hover:opacity-100 text-muted hover:text-danger text-[10px]">删</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1774,16 +1998,19 @@ export function Holdings() {
             >导出 CSV</button>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]" style={{ minWidth: sortHeaders.length * 92 }}>
+            <table className="w-full text-[13px]" style={{ minWidth: Math.max(visibleCols.length, 6) * 92 }}>
               <thead>
                 <tr className="text-muted border-b border-border/60 bg-elevated/30">
-                  {sortHeaders.map(h => (
-                    <th key={h.key} onClick={() => toggleSort(h.key)}
-                      className="px-3 py-2.5 text-left font-medium whitespace-nowrap cursor-pointer select-none hover:text-foreground">
-                      {h.label}
-                      {sortKey === h.key && <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>}
-                    </th>
-                  ))}
+                  {visibleCols.map(k => {
+                    const h = sortHeaders.find(x => x.key === k)!
+                    return (
+                      <th key={k} onClick={() => toggleSort(k)}
+                        className="px-3 py-2.5 text-left font-medium whitespace-nowrap cursor-pointer select-none hover:text-foreground">
+                        {h.label}
+                        {sortKey === k && <span className="ml-0.5 text-accent">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                      </th>
+                    )
+                  })}
                   <th className="px-3 py-2.5 text-left font-medium whitespace-nowrap">操作</th>
                 </tr>
               </thead>
@@ -1794,34 +2021,11 @@ export function Holdings() {
                   </td></tr>
                 )}
                 {rows.map(r => {
-                  const badge = REGION_BADGE[r.region ?? 'CN']
                   const concentrated = (r.position_rate ?? 0) > 0.4
                   return (
                     <tr key={r.symbol} className={`border-b border-border/40 hover:bg-elevated/30 transition-colors cursor-pointer ${concentrated ? 'bg-amber-400/[0.07]' : ''}`}
                       onClick={() => openPreview(r.symbol, r.name || '')}>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-1.5">
-                          {badge && <span className={`px-1 py-px rounded text-[9px] font-bold border ${badge.cls}`}>{badge.label}</span>}
-                          <span className="text-foreground font-medium">{r.name || '—'}</span>
-                          <span className="font-mono text-muted text-xs">{r.symbol}</span>
-                        </div>
-                      </td>
-                      {!hiddenCols.has('price') && <td className={`px-3 py-2.5 tabular-nums font-medium ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</td>}
-                      {!hiddenCols.has('change_pct') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>}
-                      {!hiddenCols.has('qty') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>}
-                      {!hiddenCols.has('avg_cost') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>}
-                      {!hiddenCols.has('market_value') && <td className="px-3 py-2.5 tabular-nums text-foreground">{r.qty === 0 ? '—' : fmtMoney(r.market_value)}</td>}
-                      {!hiddenCols.has('float_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.float_pnl)}`}>
-                        {r.qty === 0 ? '—' : fmtMoney(r.float_pnl)}{r.qty !== 0 && <span className="text-[11px] font-normal ml-1">{fmtPct(r.float_pnl_pct)}</span>}
-                      </td>}
-                      {!hiddenCols.has('day_pnl') && <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.day_pnl)}`}>{r.qty === 0 ? '—' : fmtMoney(r.day_pnl)}</td>}
-                      {!hiddenCols.has('pre_profit') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.pre_profit)}`}>{fmtMoney(r.pre_profit)}</td>}
-                      {!hiddenCols.has('hold_days') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.hold_days != null ? Math.round(r.hold_days) : '—'}</td>}
-                      {!hiddenCols.has('m1_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m1_rate)}`}>{fmtPct(r.m1_rate)}</td>}
-                      {!hiddenCols.has('m3_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m3_rate)}`}>{fmtPct(r.m3_rate)}</td>}
-                      {!hiddenCols.has('m6_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>}
-                      {!hiddenCols.has('m12_rate') && <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>}
-                      {!hiddenCols.has('position_rate') && <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>}
+                      {visibleCols.map(k => <Fragment key={k}>{renderCell(k, r)}</Fragment>)}
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           <button onClick={() => setEditing(r)} className="p-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated" title="编辑/卖出"><Pencil className="h-3.5 w-3.5" /></button>
@@ -1866,6 +2070,18 @@ export function Holdings() {
               <span className="text-sm font-semibold text-foreground">已清仓明细</span>
               <span className="text-xs text-muted">{closedRows.length} 只</span>
               <span className={`text-xs tabular-nums font-medium ${pnlColor(closedRealized)}`}>已实现合计 {fmtMoney(closedRealized)}</span>
+              {clearedCheck.data?.ok && (() => {
+                const cc = clearedCheck.data
+                const diffs = cc.local_only.length + cc.ledger_only.length
+                const tip = diffs === 0
+                  ? `账本成交核对一致 (${cc.matched.length} 只)`
+                  : `本地独有: ${cc.local_only.join(', ') || '无'}\n账本独有: ${cc.ledger_only.map(x => `${x.symbol}${x.last_sell ? `(${x.last_sell})` : ''}`).join(', ') || '无'}`
+                return diffs === 0 ? (
+                  <span className="text-[10px] text-emerald-400" title={tip}>✓ 账本核对一致</span>
+                ) : (
+                  <span className="text-[10px] text-amber-400 whitespace-pre" title={tip}>⚠ 核对差异 {diffs} 条</span>
+                )
+              })()}
               <button onClick={() => setShowClosed(v => !v)} className="ml-auto text-[11px] text-accent hover:underline">
                 {showClosed ? '收起' : '展开'}
               </button>
@@ -2006,10 +2222,14 @@ export function Holdings() {
               })()}
             </div>
           </div>
-          <AssetCurve daily={pnl.data?.daily ?? []} benchmark={benchmark.data} />
+          <AssetCurve daily={pnl.data?.daily ?? []} benchmark={benchmark.data}
+            ledgerCum={historyData.data?.cached && historyData.data.curve?.length
+              ? historyData.data.curve.filter(c => c.period.startsWith(String(year)))
+              : undefined} />
         </div>
       </div>
 
+      {showTasks && <BgTasksPanel onClose={() => setShowTasks(false)} />}
       {editing && <EditDialog row={editing} onClose={() => setEditing(null)} />}
 
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}
@@ -2039,6 +2259,7 @@ export function Holdings() {
           name={previewName}
           triggerInfo={undefined}
           markers={previewMarkers}
+          markersSource={previewMarkerSrc}
           onClose={() => setPreviewSymbol(null)}
         />
       )}

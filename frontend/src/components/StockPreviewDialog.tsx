@@ -40,7 +40,7 @@ function boardTag(symbol: string): { label: string; color: string } | null {
   return null
 }
 
-export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers }: Props & { markers?: any[] }) {
+export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers, markersSource }: Props & { markers?: any[]; markersSource?: 'tzzb' | 'calc' }) {
   const [showIntraday, setShowIntraday] = useState(false)
   const [viewMode5, setViewMode5] = useState(false)
   const [dateRange, setDateRange] = useState(getDefaultRange)
@@ -218,6 +218,16 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                     分时
                   </button>
                 ) : null}
+
+                {markers && markersSource && (
+                  <>
+                    <span className="text-muted/20 mx-0.5">|</span>
+                    <span className={`text-[10px] ${markersSource === 'tzzb' ? 'text-emerald-400/80' : 'text-muted'}`}
+                      title={markersSource === 'tzzb' ? 'B/S 点来自投资账本真实成交记录 (含成交均价)' : 'B/S 点由每日持仓快照变动推算 (价格为当日收盘)'}>
+                      B/S {markersSource === 'tzzb' ? '真实成交' : '推算'}
+                    </span>
+                  </>
+                )}
 
                 <span className="text-muted/20 mx-0.5">|</span>
 

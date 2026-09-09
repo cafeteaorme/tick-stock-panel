@@ -1501,9 +1501,19 @@ export const api = {
 
   // ---------------- 我的持仓 ----------------
   holdingsTrades: (symbol: string, account?: string) =>
-    request<{ symbol: string; events: { date: string; type: string; price: number; qty: number }[]; cost?: number | null }>(
+    request<{ symbol: string; events: { date: string; type: string; price: number; qty: number; profit?: number }[]; cost?: number | null; source?: 'tzzb' | 'calc' }>(
       `/api/holdings/${encodeURIComponent(symbol)}/trades${account ? `?account=${encodeURIComponent(account)}` : ''}`,
     ),
+  holdingsTzzbTrades: () =>
+    request<{ ok: boolean; fetched_at?: string; accounts: { fund_key: string; name: string; trades: number }[]; n_trades: number; n_cleared: number; n_bank: number }>('/api/holdings/tzzb/trades'),
+  holdingsTzzbTradesRefresh: () =>
+    request<{ ok: boolean; message?: string }>('/api/holdings/tzzb/trades/refresh', { method: 'POST' }),
+  holdingsTzzbClearedCheck: (account?: string) =>
+    request<{ ok: boolean; account?: string; matched: string[]; local_only: string[]; ledger_only: { symbol: string; name?: string; last_sell?: string; profit?: number }[] }>(
+      `/api/holdings/tzzb/cleared-check${account ? `?account=${encodeURIComponent(account)}` : ''}`,
+    ),
+  holdingsBgTasks: () =>
+    request<{ tasks: { name: string; key: string; running: boolean; last_run?: string | null; ok?: boolean | null }[] }>('/api/holdings/bg-tasks'),
   holdingsReportsList: () =>
     request<{ reports: { id: string; date: string; content: string; summary?: string | null; saved_at: string }[] }>('/api/holdings/reports'),
   holdingsReportsSave: (r: { date: string; content: string; summary?: string }) =>
@@ -1549,7 +1559,7 @@ export const api = {
   holdingsTzzbClear: () =>
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbHistoryData: () =>
-    request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[] }>('/api/holdings/tzzb/history-data'),
+    request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[] }>('/api/holdings/tzzb/history-data'),
   holdingsTzzbHkRate: () =>
     request<{ rate: number; before: number }>('/api/holdings/tzzb/hk-rate'),
   holdingsTzzbHistoryStatus: () =>
