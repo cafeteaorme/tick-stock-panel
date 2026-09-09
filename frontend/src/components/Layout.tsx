@@ -298,8 +298,7 @@ export function Layout() {
     queryKey: QK.pipelineJobs,
     queryFn: () => api.pipelineJobs(1),
     refetchInterval: (query) => (query.state.data?.active_id ? 2000 : 15000),
-    refetchIntervalInBackground: true,
-  })
+      })
   const isDataSyncing = !!pipelineJobs?.active_id
 
   // 数据同步完成的"瞬时反馈": isDataSyncing 从 true→false 时显示绿色对勾,

@@ -133,8 +133,7 @@ export function Monitor() {
     queryKey: [...QK.alerts(filter === 'all' ? undefined : filter), extColumnsParam ?? ''],
     queryFn: () => api.alertsList({ days: 7, limit: 500, source: filter === 'all' ? undefined : filter, extColumns: extColumnsParam }),
     refetchInterval: 10000,
-    refetchIntervalInBackground: true,
-  })
+      })
   const total = alertsQuery.data?.total ?? 0
 
   // 规则个数

@@ -100,8 +100,7 @@ function MonitorWidget({ onStockClick }: { onStockClick: (event: AlertEvent) => 
     queryKey: ['alerts', ''],
     queryFn: () => api.alertsList({ days: 7, limit: 10 }),
     refetchInterval: 10000,
-    refetchIntervalInBackground: true,
-  })
+      })
   const events: AlertEvent[] = alerts.data?.alerts ?? []
 
   if (events.length === 0) {

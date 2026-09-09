@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time as _time
 from datetime import date, timedelta
 from typing import Any
 
@@ -109,25 +111,64 @@ def _fin(v) -> float | None:
 
 
 _MKT_CACHE: dict[str, tuple[float, dict[str, dict]]] = {"t": 0.0, "rows": {}}
+_MKT_LOCK = threading.Lock()
+
+
+def _invalid_mkt_cache() -> None:
+    with _MKT_LOCK:
+        _MKT_CACHE["t"] = 0.0
+        _MKT_CACHE["rows"] = {}
 
 
 def _market_rows(request: Request, symbols: list[str], rates: dict) -> dict[str, dict]:
-    """从 TickFlow 本地数据计算每只持仓的市场字段 (60s 进程内缓存)。
-
-    返回 {symbol: {price, change_pct, m1_rate, m3_rate, m6_rate, m12_rate}}。
-    CN 走本地 enriched 批量; HK/US 优先本地 parquet, 缺失时单只拉取一次并落盘。
-    """
-    import time as _time
+    """市场字段 (60s 缓存)。冷缓存/过期时: 有缓存先返回旧值, 后台线程补齐; 无缓存先返回本地落库价秒出。"""
+    import threading as _th
 
     now = _time.time()
-    if now - _MKT_CACHE["t"] < 60 and _MKT_CACHE["rows"]:
-        return {k: v for k, v in _MKT_CACHE["rows"].items() if k in symbols}
+    with _MKT_LOCK:
+        cached = dict(_MKT_CACHE["rows"])
+        last = _MKT_CACHE["t"]
+    fresh = now - last < 60
+    if fresh:
+        return {k: v for k, v in cached.items() if k in symbols}
 
-    repo = request.app.state.repo
+    # 缺 symbol → 后台线程补齐 (不阻塞本次响应)
+    miss = [s for s in symbols if s not in cached]
+    if miss:
+        def _fill(ms=miss):
+            try:
+                computed = _compute_market(request.app.state.repo, ms)
+                with _MKT_LOCK:
+                    _MKT_CACHE["rows"].update(computed)
+                    _MKT_CACHE["t"] = _time.time()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("market rows fill failed: %s", e)
+        _th.Thread(target=_fill, daemon=True).start()
+
+    # 有旧值 → 直接返回 (数据不闪失); 无 → 用本地落库价顶住首屏
+    if cached:
+        return {k: v for k, v in cached.items() if k in symbols}
+    out = {}
+    rows = holdings_service.list_all(request.app.state.repo.resolve_asset_type.__self__ and "") if False else _stored_rows(request)
+    for r in rows:
+        sym = r["symbol"]
+        if sym in symbols and r.get("price") is not None:
+            out[sym] = {"price": r["price"], "change_pct": r.get("change_pct")}
+    return out
+
+
+def _stored_rows(request: Request) -> list[dict]:
+    try:
+        return holdings_service.list_all(holdings_service.resolve_account(None))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _compute_market(repo, symbols: list[str]) -> dict[str, dict]:
+    """同步计算市场字段 (在后台线程执行)。"""
     out: dict[str, dict] = {}
     cn = [s for s in symbols if not is_hk_or_us(s)]
     hk_us = [s for s in symbols if is_hk_or_us(s)]
-
     if cn:
         try:
             end = date.today()
@@ -140,7 +181,6 @@ def _market_rows(request: Request, symbols: list[str], rates: dict) -> dict[str,
                     out[sym] = _calc_market_fields(closes)
         except Exception as e:  # noqa: BLE001
             logger.warning("market rows cn failed: %s", e)
-
     from app.services.kline_sync import fetch_hk_us_daily_with_indicators
 
     for sym in hk_us:
@@ -152,9 +192,6 @@ def _market_rows(request: Request, symbols: list[str], rates: dict) -> dict[str,
                     out[sym] = _calc_market_fields(closes)
         except Exception as e:  # noqa: BLE001
             logger.warning("market rows %s failed: %s", sym, e)
-
-    _MKT_CACHE["t"] = now
-    _MKT_CACHE["rows"] = out
     return out
 
 
@@ -422,20 +459,25 @@ def upsert_holding(symbol: str, req: UpsertRequest, request: Request, account: s
     if req.qty <= 0:
         raise HTTPException(400, "数量必须大于 0")
     rows = holdings_service.upsert(_acc(request, account), symbol, req.qty, req.available, req.avg_cost)
+    _invalid_mkt_cache()
     return {"rows": rows}
 
 
 @router.post("/{symbol}/sell")
 def sell_holding(symbol: str, req: SellRequest, account: str | None = Query(None)):
     try:
-        return holdings_service.sell(_acc(request, account), symbol, req.price, req.qty)
+        res = holdings_service.sell(_acc(request, account), symbol, req.price, req.qty)
+        _invalid_mkt_cache()
+        return res
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
 
 
 @router.delete("/{symbol}")
 def remove_holding(symbol: str, account: str | None = Query(None)):
-    return {"rows": holdings_service.remove(_acc(request, account), symbol)}
+    removed = holdings_service.remove(_acc(request, account), symbol)
+    _invalid_mkt_cache()
+    return {"rows": removed}
 
 
 # ---------------------------------------------------------------- 投资账本同步 (tzzb)

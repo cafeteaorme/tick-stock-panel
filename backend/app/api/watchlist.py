@@ -394,11 +394,17 @@ def watchlist_enriched(
     if hk_us_symbols:
         capset = getattr(request.app.state, "capabilities", None)
         qrows: list[dict] = []
-        if capset is not None:
-            try:
-                qrows = watchlist.fetch_quotes(hk_us_symbols, capset)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("hk/us watchlist quotes failed: %s", e)
+        if capset is not None and hk_us_symbols:
+            # 统一行情缓存: 命中直接返回 (15s TTL), 避免每次请求同步阻塞拉行情
+            from app.services.quote_cache import get_quotes
+
+            cached = get_quotes(hk_us_symbols, lambda syms: watchlist.fetch_quotes(syms, capset))
+            qrows = list(cached.values())
+            if not qrows:
+                try:
+                    qrows = watchlist.fetch_quotes(hk_us_symbols, capset)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("hk/us watchlist quotes failed: %s", e)
         if qrows:
             q_df = pl.DataFrame(
                 {
