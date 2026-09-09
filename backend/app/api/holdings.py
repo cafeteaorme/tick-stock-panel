@@ -236,8 +236,8 @@ def summary(request: Request, account: str | None = Query(None)):
         "realized_pnl": realized,
         "total_pnl": float_pnl + realized,
         "total_pnl_pct": ((float_pnl + realized) / initial) if initial else None,
-        # 累计盈亏 = 初始本金 - 当前总资产 (出金仅作记录, 不参与计算)
-        "cum_pnl": (initial - total_asset) if initial else None,
+        # 累计盈亏 = 当前总资产 - 初始本金 (资产超过本金即为正收益)
+        "cum_pnl": (total_asset - initial) if initial else None,
         "day_pnl": day_pnl,
         "day_pnl_pct": (day_pnl / (total_asset - day_pnl)) if (total_asset - day_pnl) else None,
         "positions": len(enriched),
@@ -252,13 +252,12 @@ def update_portfolio(req: PortfolioRequest, request: Request, account: str | Non
 
 
 @router.post("/reset")
-def reset_data(req: ResetRequest | None = None, account: str | None = Query(None)):
-    """重置当前账户: 清空持仓+快照 (可选资金设置)。body 可省略。"""
-    if req is None:
-        req = ResetRequest()
-    acc = holdings_service.resolve_account(account)
-    removed = holdings_service.reset(acc, include_portfolio=req.include_portfolio)
-    return {"account": acc, "removed": removed}
+def reset_data(request: Request, req: ResetRequest | None = None, account: str | None = Query(None)):
+    """重置: 清除投资账本 Cookie 配置 + 删除账本同步生成的全部账户 (持仓/快照/资金)。"""
+    from app.services import tzzb
+
+    res = tzzb.reset_tzzb(holdings_service)
+    return {"ok": True, **res}
 
 
 @router.post("/import")

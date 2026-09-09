@@ -125,32 +125,48 @@ def probe_endpoints(cookie: str) -> tuple[str | None, str]:
     return None, "；".join(samples[-4:]) if samples else "全部端点请求失败"
 
 
-_SYNC_INTERVAL_S = 3600  # 每小时
+# 交易日 (周一至五) 北京时间 9:31 / 16:05 各同步一次
+_SYNC_SLOTS = [(9, 31), (16, 5)]
+_SYNC_CHECK_S = 20
 _sync_thread: threading.Thread | None = None
 _sync_stop = threading.Event()
+_synced_marker = ""  # "date:slot" 防同日同时点重复执行
 
 
 def start_background_sync() -> bool:
-    """每小时后台同步一次 (仅配置了 Cookie 时真正拉取)。幂等。"""
+    """交易日凌晨外常驻检查线程, 到 9:31/16:05 时点自动同步一次。幂等。"""
     global _sync_thread
     if _sync_thread is not None and _sync_thread.is_alive():
         return False
     _sync_stop.clear()
 
     def _loop() -> None:
-        while not _sync_stop.wait(_SYNC_INTERVAL_S):
-            try:
-                cfg = load_config()
-                if not (cfg.get("cookie") or "").strip():
-                    continue  # 未配置, 静默跳过
-                res = sync()
-                logger.info("tzzb hourly sync: %s", res.get("message", "")[:120])
-            except Exception as e:  # noqa: BLE001
-                logger.warning("tzzb hourly sync error: %s", e)
+        global _synced_marker
+        from app.market_time import CN_TZ
 
-    _sync_thread = threading.Thread(target=_loop, daemon=True, name="tzzb-hourly-sync")
+        while not _sync_stop.wait(_SYNC_CHECK_S):
+            try:
+                now = datetime.now(CN_TZ)
+                if now.weekday() >= 5:  # 周末
+                    continue
+                slot = (now.hour, now.minute)
+                if slot not in _SYNC_SLOTS:
+                    continue
+                marker = f"{now.date().isoformat()}:{slot[0]:02d}:{slot[1]:02d}"
+                if _synced_marker == marker:
+                    continue
+                cfg = load_config()
+                if not (cfg.get("cookie") or "").strip() and not _cdp_port_alive():
+                    continue  # 未配置, 静默跳过
+                _synced_marker = marker
+                res = sync()
+                logger.info("tzzb scheduled sync %s: %s", marker, res.get("message", "")[:120])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("tzzb scheduled sync error: %s", e)
+
+    _sync_thread = threading.Thread(target=_loop, daemon=True, name="tzzb-scheduled-sync")
     _sync_thread.start()
-    logger.info("tzzb hourly sync started (interval %ss)", _SYNC_INTERVAL_S)
+    logger.info("tzzb scheduled sync started (trading days 09:31/16:05 CST)")
     return True
 
 
@@ -278,6 +294,48 @@ def _market_suffix(market: str, code: str) -> str:
     if market in ("12", "144"):
         return ".BJ"
     return ".SH" if len(code) == 6 and code[0] in "569" else ".SZ"
+
+
+def reset_tzzb(holdings_svc) -> dict[str, Any]:
+    """重置投资账本对接: 清除 Cookie 配置 + 删除由账本同步生成的全部账户 (含持仓/快照/资金)。
+
+    同步生成的账户以其 name 与账本 brokername 一致来识别 (见 sync 中创建逻辑)。
+    返回删除说明。
+    """
+    cfg = load_config()
+    accounts_raw = None
+    removed = []
+    cookie = (cfg.get("cookie") or "").strip()
+    if cookie:
+        try:
+            accounts_raw = _api("/caishen_fund/pc/account/v1/account_list", cookie, {})
+        except Exception:  # noqa: BLE001
+            accounts_raw = None
+    broker_names = []
+    if accounts_raw:
+        for b in (accounts_raw.get("common") or []) + (accounts_raw.get("rzrq") or []):
+            nm = (b.get("brokername") or b.get("manualname") or "").strip()
+            if nm:
+                broker_names.append(nm)
+
+    acc_obj = holdings_svc.list_accounts()
+    keep, drop = [], []
+    for a in acc_obj["accounts"]:
+        # default 始终保留; 同步生成的账户 (名称命中账本 brokername) 删除
+        (drop if (a["id"] != holdings_svc.DEFAULT_ACCOUNT and a["name"] in broker_names) else keep).append(a)
+    for a in drop:
+        holdings_svc.delete_account(a["id"])
+        removed.append(a["name"])
+
+    _store_path().write_text(json.dumps({
+        "cookie": "", "endpoint": "", "user_name": "", "last_sync": None,
+        "last_result": "已重置", "last_ok": False,
+    }, ensure_ascii=False, indent=2), "utf-8")
+    save_config(**{
+        "cookie": "", "endpoint": "", "user_name": "", "last_sync": None,
+        "last_result": "已重置", "last_ok": False,
+    })
+    return {"removed_accounts": removed, "cookie_cleared": True}
 
 
 def sync(account_id: str | None = None) -> dict[str, Any]:

@@ -1316,21 +1316,24 @@ export function Holdings() {
     const d = accountsQ.data
     if (!d) return
     const ids = new Set(d.accounts.map(a => a.id))
-    if (!activeAcc || !ids.has(activeAcc)) setActiveAcc(d.active)
+    const stored = localStorage.getItem('tf-holdings-account')
+    const target = (stored && ids.has(stored)) ? stored
+      : (activeAcc && ids.has(activeAcc)) ? activeAcc : d.active
+    if (target !== activeAcc) setActiveAcc(target)
   }, [accountsQ.data, activeAcc])
 
   const holdings = useQuery({
     queryKey: [...QK.holdings, activeAcc], queryFn: () => api.holdingsList(false, activeAcc || undefined),
-    enabled: !!activeAcc, refetchInterval: 15_000, refetchOnWindowFocus: true,
+    enabled: !!activeAcc,
   })
   const summary = useQuery({
     queryKey: [...QK.holdingsSummary, activeAcc], queryFn: () => api.holdingsSummary(activeAcc || undefined),
-    enabled: !!activeAcc, refetchInterval: 15_000, refetchOnWindowFocus: true,
+    enabled: !!activeAcc,
   })
   const pnl = useQuery({
     queryKey: [...QK.holdingsPnl(`${year}-01-01`), activeAcc],
     queryFn: () => api.holdingsPnl(`${year}-01-01`, undefined, activeAcc || undefined),
-    enabled: !!activeAcc, refetchInterval: 120_000,
+    enabled: !!activeAcc,
   })
   const benchmark = useQuery({
     queryKey: ['holdings-benchmark', year, activeAcc],
@@ -1489,12 +1492,13 @@ export function Holdings() {
         <div className="flex-1" />
         {/* 账户页签: 名称 + 当日盈亏 */}
         <div className="flex items-center gap-1 p-0.5 rounded-btn bg-elevated">
-          {accounts.map(a => {
+          {[...accounts].sort((x, y) => (Number(x.id === 'default')) - Number(y.id === 'default')).map(a => {
             const active = a.id === activeAcc
             return (
               <button key={a.id}
                 onClick={() => {
                   setActiveAcc(a.id)
+                  localStorage.setItem('tf-holdings-account', a.id)
                   api.holdingsSetActiveAccount(a.id).catch(() => {})
                   refreshAll()
                 }}
@@ -1558,7 +1562,6 @@ export function Holdings() {
         >
           <Sparkles className="h-3.5 w-3.5" />AI 分析
         </button>
-        <button onClick={refreshAll} className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated" title="刷新"><RefreshCw className="h-4 w-4" /></button>
         <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground border border-border"><Camera className="h-3.5 w-3.5" />截图导入</button>
         <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90"><Plus className="h-3.5 w-3.5" />手动添加</button>
       </div>
