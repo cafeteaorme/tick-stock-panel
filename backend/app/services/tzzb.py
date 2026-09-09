@@ -256,7 +256,93 @@ _CDP_PORT = 9223
 _PROFILE_DIR = "chrome_tzzb_profile"
 
 
-def _fin(v):
+# ---------------------------------------------------------------- CDP 数据桥
+# 投资账本接口带 JS 反爬 token, 脚本直接复现会被 400 拒绝。
+# 改由专用 Chrome 页面自己加载数据, CDP 捕获真实响应体。
+
+
+def _cdp_new_tab(url: str) -> None:
+    import urllib.request as _ur
+
+    opener = _ur.build_opener(_ur.ProxyHandler({}))
+    req = _ur.Request(f"http://127.0.0.1:{_CDP_PORT}/json/new?{urllib.parse.quote(url, safe='')}", method="PUT")
+    opener.open(req, timeout=10).read()
+
+
+def _cdp_wait_page(timeout_s: float = 15) -> dict:
+    import time as _time
+
+    deadline = _time.time() + timeout_s
+    while _time.time() < deadline:
+        for t in _cdp_json("/json/list"):
+            if t.get("type") == "page":
+                return t
+        _time.sleep(0.5)
+    raise RuntimeError("CDP 无可用页面")
+
+
+def _cdp_capture(page_url: str, patterns: tuple[str, ...], wait_s: float = 12) -> dict[str, str]:
+    """打开页面, 捕获命中 patterns 的 XHR 响应体。返回 {url: body}。"""
+    import time as _time
+
+    import websocket
+
+    _cdp_new_tab(page_url)
+    time.sleep(1.0)
+    targets = _cdp_json("/json/list")
+    page = next((t for t in targets if t.get("type") == "page"
+                 and page_url.split("?")[0][-30:] in (t.get("url") or "")), None)
+    if not page:
+        page = next((t for t in targets if t.get("type") == "page"), None)
+    if not page:
+        raise RuntimeError("CDP 无可用页面")
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=int(wait_s + 10),
+                                     suppress_origin=True)
+    bodies: dict[str, str] = {}
+    pending: dict[str, str] = {}  # requestId -> url
+    try:
+        ws.send(json.dumps({"id": 1, "method": "Network.enable"}))
+        ws.send(json.dumps({"id": 2, "method": "Page.reload"}))
+        deadline = _time.time() + wait_s
+        ws.settimeout(1.0)
+        while _time.time() < deadline:
+            try:
+                msg = json.loads(ws.recv())
+            except Exception:
+                continue
+            meth = msg.get("method")
+            params = msg.get("params") or {}
+            if meth == "Network.requestWillBeSent":
+                u = params.get("request", {}).get("url", "")
+                if any(p in u for p in patterns):
+                    pending[params["requestId"]] = u
+            elif meth == "Network.loadingFinished" and params.get("requestId") in pending:
+                rid = params["requestId"]
+                u = pending.pop(rid)
+                try:
+                    rb = json.loads(json.dumps({"id": 100, "method": "Network.getResponseBody",
+                                                "params": {"requestId": rid}}))
+                    ws.send(json.dumps(rb))
+                    # 响应在后续 recv 到来 — 记入待匹配
+                except Exception:  # noqa: BLE001
+                    pass
+                bodies[u] = "__pending__" + rid
+        # 收集所有响应体 (统一再取一轮)
+        result = {}
+        for rid, u in list(pending.items()):
+            try:
+                rb = json.dumps({"id": 500, "method": "Network.getResponseBody",
+                                 "params": {"requestId": rid}})
+                ws.send(rb)
+            except Exception:  # noqa: BLE001
+                pass
+        _time.sleep(1.0)
+        return bodies if bodies else {}
+    finally:
+        ws.close()
+
+
+def _cdp_cookie() -> str:
     import math
     try:
         f = float(v)
