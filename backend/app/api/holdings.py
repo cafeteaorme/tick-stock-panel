@@ -96,41 +96,28 @@ def _fetch_quotes_map(request: Request, symbols: list[str]) -> dict[str, dict]:
     return {r.get("symbol"): r for r in rows or [] if r.get("symbol")}
 
 
-def _enrich_rows(request: Request, rows: list[dict], rates: dict) -> list[dict]:
-    """附加现价/涨跌幅/市值(人民币)/浮动盈亏/当日盈亏。"""
-    symbols = [r["symbol"] for r in rows]
-    repo = request.app.state.repo
-    quotes = _fetch_quotes_map(request, symbols)
-    name_map = repo.get_name_map(symbols)
-
+def _enrich_rows(rows: list[dict], rates: dict, name_map: dict[str, str] | None = None) -> list[dict]:
+    """本地优先: 价格/涨跌幅用同步落库值, 市值/盈亏按人民币口径本地计算 (毫秒响应)。"""
     out = []
     for r in rows:
-        q = quotes.get(r["symbol"]) or {}
-        price = q.get("price") or q.get("last_price")
-        pct = q.get("pct")
         qty = float(r.get("qty") or 0)
         cost = float(r.get("avg_cost") or 0)
         region = get_region(r["symbol"])
         fx = _fx_rate(region, rates)
+        price = r.get("price")
+        pct = r.get("change_pct")
         market_value = price * qty * fx if price is not None else None
-        # 成本同样按汇率折算 (港币成本 → 人民币口径)
         cost_cny = cost * fx if cost else 0.0
-        float_pnl = (price * fx - cost_cny) * qty if price is not None and cost else None
-        day_pnl = None
-        if market_value is not None and pct is not None and (1 + pct) != 0:
-            day_pnl = market_value - market_value / (1 + pct)
+        float_pnl = (price * fx - cost_cny) * qty if (price is not None and cost_cny) else None
         out.append({
             **r,
-            "name": name_map.get(r["symbol"]),
             "region": region,
             "fx": fx,
-            "price": price,
-            "change_pct": pct,
-            "change_amount": q.get("ext.change_amount"),
             "market_value": market_value,
             "float_pnl": float_pnl,
             "float_pnl_pct": ((price * fx - cost_cny) / cost_cny) if (price is not None and cost_cny) else None,
-            "day_pnl": day_pnl,
+            "day_pnl": r.get("pre_profit"),
+            "day_pnl_pct": r.get("pre_rate"),
         })
     return out
 
@@ -147,7 +134,7 @@ def accounts(request: Request):
     for a in obj["accounts"]:
         acc_id = a["id"]
         rows = holdings_service.list_all(acc_id)
-        enriched = _enrich_rows(request, rows, rates)
+        enriched = _enrich_rows(rows, rates)
         day_pnl = sum(r["day_pnl"] or 0 for r in enriched)
         market_value = sum(r["market_value"] or 0 for r in enriched)
         port = holdings_service.get_portfolio(acc_id)
@@ -196,7 +183,8 @@ def list_holdings(request: Request, include_closed: bool = Query(False), account
     acc = _acc(request, account)
     rows = holdings_service.list_all(acc, include_closed=include_closed)
     open_rows = [r for r in rows if r.get("status") != "closed"]
-    enriched = _enrich_rows(request, open_rows, _rates())
+    repo = request.app.state.repo
+    enriched = _enrich_rows(open_rows, _rates(), repo.get_name_map([r["symbol"] for r in open_rows]))
     if include_closed:
         enriched = enriched + [r for r in rows if r.get("status") == "closed"]
     return {"rows": enriched, "account": acc}
@@ -207,7 +195,7 @@ def summary(request: Request, account: str | None = Query(None)):
     acc = _acc(request, account)
     rates = _rates()
     rows = holdings_service.list_all(acc)
-    enriched = _enrich_rows(request, rows, rates)
+    enriched = _enrich_rows(rows, rates, request.app.state.repo.get_name_map([r["symbol"] for r in rows]))
     portfolio = holdings_service.get_portfolio(acc)
 
     total_value = sum(r["market_value"] or 0 for r in enriched)
@@ -540,11 +528,11 @@ def pnl(
     today_iso = end_d.isoformat()
     if daily and daily[-1]["date"] == today_iso:
         cur_seg = timeline[-1]
-        quotes = _fetch_quotes_map(request, [r["symbol"] for r in cur_seg["rows"] if r.get("qty")])
-        if quotes:
+        stored_prices = {r["symbol"]: r.get("price") for r in holdings_service.list_all(acc) if r.get("price")}
+        if stored_prices:
             rates = _rates()
             rt_value = cur_seg["cash"] + sum(
-                (quotes[r["symbol"]].get("price") or last_close.get(r["symbol"], 0.0))
+                (stored_prices.get(r["symbol"]) or last_close.get(r["symbol"], 0.0))
                 * float(r["qty"]) * _fx_rate(get_region(r["symbol"]), rates)
                 for r in cur_seg["rows"] if r.get("qty")
             )
@@ -669,7 +657,7 @@ async def analyze_holdings(request: Request, account: str | None = Query(None)):
 
     summary_data = summary(request, account)
     rows = holdings_service.list_all(_acc(request, account))
-    enriched = _enrich_rows(request, rows, _rates())
+    enriched = _enrich_rows(rows, _rates(), request.app.state.repo.get_name_map([r["symbol"] for r in rows]))
 
     risk_brief = []
     repo = request.app.state.repo

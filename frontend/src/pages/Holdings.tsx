@@ -80,6 +80,34 @@ function Sparkline({ values }: { values: number[] }) {
  * 汇总卡 (字体放大 + 金额/百分比红绿)
  * ================================================================ */
 
+function LoadingSkeleton({ height = 120 }: { height?: number }) {
+  return (
+    <div className="rounded-card border border-border bg-surface p-5 animate-pulse" style={{ height }}>
+      <div className="h-3 w-24 bg-elevated rounded mb-3" />
+      <div className="h-7 w-48 bg-elevated rounded mb-4" />
+      <div className="grid grid-cols-4 gap-4">
+        {[0, 1, 2, 3].map(i => (
+          <div key={i} className="space-y-1.5">
+            <div className="h-2.5 w-16 bg-elevated rounded" />
+            <div className="h-4 w-20 bg-elevated rounded" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ErrorBanner({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-card border border-danger/30 bg-danger/5 px-4 py-3 flex items-center gap-3">
+      <span className="text-xs text-danger flex-1">{message}</span>
+      <button onClick={onRetry} className="px-3 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground">
+        重试
+      </button>
+    </div>
+  )
+}
+
 function SummaryCard({ s, spark, onSetCap }: {
   s: HoldingsSummary
   spark: number[]
@@ -1575,6 +1603,11 @@ export function Holdings() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
+        {summary.error && <ErrorBanner message={`汇总加载失败：${(summary.error as Error).message}`} onRetry={refreshAll} />}
+        {holdings.error && <ErrorBanner message={`持仓加载失败：${(holdings.error as Error).message}`} onRetry={refreshAll} />}
+        {!s && !summary.isLoading && !holdings.isLoading && (
+          <LoadingSkeleton height={140} />
+        )}
         {s && <SummaryCard s={s} spark={spark} onSetCap={(v) => {
           api.holdingsPortfolio({ initial_cap: v }).then(() => {
             qc.invalidateQueries({ queryKey: QK.holdingsSummary })
@@ -1607,6 +1640,11 @@ export function Holdings() {
                 </tr>
               </thead>
               <tbody>
+                {holdings.isLoading && rows.length === 0 && (
+                  <tr><td colSpan={15} className="px-3 py-10 text-center text-muted text-xs">
+                    <Loader2 className="h-4 w-4 animate-spin inline mr-2" />持仓数据加载中…
+                  </td></tr>
+                )}
                 {rows.map(r => {
                   const badge = REGION_BADGE[r.region ?? 'CN']
                   return (

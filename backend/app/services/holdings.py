@@ -34,6 +34,7 @@ _SCHEMA = {
     "realized_pnl": pl.Float64,
     # 投资账本同步的富字段
     "price": pl.Float64,
+    "change_pct": pl.Float64,
     "hold_days": pl.Float64,
     "position_rate": pl.Float64,
     "pre_profit": pl.Float64,
@@ -93,22 +94,47 @@ def _acc_dir(account_id: str) -> Path:
     return p
 
 
+def _atomic_write(path: Path, data: str) -> None:
+    """原子写: 临时文件 + os.replace, 避免进程被杀导致文件截断损坏。"""
+    import os
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(data, "utf-8")
+    os.replace(tmp, path)
+
+
 def list_accounts() -> dict[str, Any]:
     path = _accounts_path()
+    obj: dict[str, Any] | None = None
     try:
-        obj = json.loads(path.read_text("utf-8"))
-        if obj.get("accounts"):
-            return obj
+        parsed = json.loads(path.read_text("utf-8"))
+        if parsed.get("accounts"):
+            obj = parsed
     except Exception:  # noqa: BLE001
-        pass
-    obj = {"accounts": [{"id": DEFAULT_ACCOUNT, "name": "默认账户", "created_at": datetime.utcnow().isoformat(timespec="seconds")}],
-           "active": DEFAULT_ACCOUNT}
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), "utf-8")
+        obj = None
+    if obj is None:
+        # 损坏/缺失 → 从磁盘上现存账户目录重建 (目录名即账户 id)
+        rebuilt = []
+        base = _base_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        for d in sorted(base.iterdir()):
+            if d.name == DEFAULT_ACCOUNT and d.is_dir():
+                rebuilt.insert(0, {"id": d.name, "name": "默认账户",
+                                   "created_at": datetime.utcnow().isoformat(timespec="seconds")})
+            elif d.is_dir() and (d / "holdings.parquet").exists():
+                rebuilt.append({"id": d.name, "name": f"账户 {d.name[-4:]}",
+                                "created_at": datetime.utcnow().isoformat(timespec="seconds")})
+        obj = {"accounts": rebuilt or [{"id": DEFAULT_ACCOUNT, "name": "默认账户",
+                                        "created_at": datetime.utcnow().isoformat(timespec="seconds")}],
+               "active": (rebuilt or [DEFAULT_ACCOUNT])[0] if rebuilt else DEFAULT_ACCOUNT}
+        obj["active"] = obj["accounts"][0]["id"] if obj["accounts"] else DEFAULT_ACCOUNT
+        save_accounts(obj)
+    if obj.get("active") not in {a["id"] for a in obj["accounts"]}:
+        obj["active"] = obj["accounts"][0]["id"] if obj["accounts"] else DEFAULT_ACCOUNT
     return obj
 
 
 def save_accounts(obj: dict[str, Any]) -> None:
-    _accounts_path().write_text(json.dumps(obj, ensure_ascii=False, indent=2), "utf-8")
+    _atomic_write(_accounts_path(), json.dumps(obj, ensure_ascii=False, indent=2))
 
 
 def resolve_account(account_id: str | None) -> str:
@@ -333,7 +359,7 @@ def set_portfolio(account_id: str, initial_cap: float | None = None,
         "withdrawals": float(withdrawals) if withdrawals is not None else cur["withdrawals"],
         "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
-    _portfolio_path(account_id).write_text(json.dumps(obj, ensure_ascii=False), "utf-8")
+    _atomic_write(_portfolio_path(account_id), json.dumps(obj, ensure_ascii=False, indent=2))
     return obj
 
 

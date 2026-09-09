@@ -55,9 +55,12 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(**updates: Any) -> dict[str, Any]:
+    import os
     cfg = load_config()
     cfg.update(updates)
-    _store_path().write_text(json.dumps(cfg, ensure_ascii=False, indent=2), "utf-8")
+    tmp = _store_path().with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), "utf-8")
+    os.replace(tmp, _store_path())
     return cfg
 
 
@@ -382,6 +385,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
             cost = float(p.get("cost") or 0)
             extras = {
                 "price": _f(p.get("price")),
+                "change_pct": _f(p.get("pre_rate")),
                 "hold_days": _f(p.get("hold_days")),
                 "position_rate": _f(p.get("position_rate")),
                 "pre_profit": _f(p.get("pre_profit")),
