@@ -296,6 +296,14 @@ def save_ai_settings(req: AiSettingsIn) -> dict:
     if updates:
         secrets_store.save(updates)
 
+    # AI 配置变更后失效视觉模型探测缓存 (下次识别重新探测)
+    try:
+        from app.services.watchlist_ocr.ai_vision import reset_vision_model_cache
+
+        reset_vision_model_cache()
+    except Exception:  # noqa: BLE001
+        pass
+
     provider = current_ai_provider()
     return {
         "ok": True,
@@ -323,6 +331,14 @@ def clear_ai_settings() -> dict:
     settings.ai_model = ""
     settings.ai_codex_command = "codex"
     settings.ai_codex_reasoning_effort = ""
+
+    # 视觉模型探测缓存同步失效
+    try:
+        from app.services.watchlist_ocr.ai_vision import reset_vision_model_cache
+
+        reset_vision_model_cache()
+    except Exception:  # noqa: BLE001
+        pass
 
     return {"ok": True}
 

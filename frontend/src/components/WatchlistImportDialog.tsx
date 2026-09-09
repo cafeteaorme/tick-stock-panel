@@ -77,6 +77,7 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
   const [candidates, setCandidates] = useState<WatchlistImportCandidate[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
+  const [recentPickedUrls, setRecentPickedUrls] = useState<Set<string>>(new Set())
   const [ocrAvailable, setOcrAvailable] = useState<boolean | null>(null)
   const [installHint, setInstallHint] = useState('')
   const batchAdd = useWatchlistBatchAdd()
@@ -104,6 +105,7 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
       revokePreviews(prev)
       return []
     })
+    setRecentPickedUrls(new Set())
     if (inputRef.current) inputRef.current.value = ''
   }, [abortInFlight, revokePreviews])
 
@@ -330,8 +332,11 @@ export function WatchlistImportDialog({ open, onClose }: Props) {
             />
 
             <RecentPhotoStrip
-              pickedKeys={new Set(previewUrls.map((_, i) => `recent:${i}`))}
-              onPick={(im: PickedImage) => onPick([im.file] as unknown as FileList)}
+              pickedKeys={recentPickedUrls}
+              onPick={(im: PickedImage) => {
+                setRecentPickedUrls(prev => new Set([...prev, im.key]))
+                onPick([im.file])
+              }}
             />
 
             <button
