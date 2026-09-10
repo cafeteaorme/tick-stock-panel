@@ -245,12 +245,6 @@ def upsert(account_id: str, symbol: str, qty: float,
            available: float | None = None, avg_cost: float | None = None,
            extras: dict | None = None, source: str = "tzzb") -> list[dict]:
     df = _read(account_id)
-    # 手动来源 (manual/screenshot) 的行不被 tzzb 同步覆盖或删除
-    if source == "manual":
-        # 手动添加: 不覆盖已有行 (由调用方决定)
-        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
-    else:
-        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
     row = {
         "symbol": symbol,
         "qty": float(qty),
@@ -266,6 +260,12 @@ def upsert(account_id: str, symbol: str, qty: float,
         # extras 可覆盖默认值 (尤其 status/closed_at: 账本报 qty=0 且本地无持仓 → 直接落为已清仓行)
         if k in _SCHEMA:
             row[k] = v
+    if row["status"] == "closed":
+        # 清仓行: 同股旧 closed 行直接替换 (否则每次同步叠加一条), 顺带清掉残留 open 行
+        df = df.filter(pl.col("symbol") != symbol)
+    else:
+        # open 行: 只替换同股 open 行, 保留历史 closed 轮次
+        df = df.filter(~((pl.col("symbol") == symbol) & (pl.col("status") != "closed")))
     out = pl.concat([pl.DataFrame([row], schema=_SCHEMA), df], how="diagonal_relaxed")
     _write(account_id, out)
     return list_all(account_id)
