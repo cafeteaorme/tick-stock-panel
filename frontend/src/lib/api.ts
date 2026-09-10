@@ -294,6 +294,8 @@ export interface HoldingRow {
   status: string
   opened_at?: string | null
   closed_at?: string | null
+  sell_date?: string | null
+  settle_date?: string | null
   realized_pnl?: number | null
   price?: number | null
   change_pct?: number | null

@@ -2091,7 +2091,7 @@ export function Holdings() {
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="text-muted border-b border-border/60 bg-elevated/30">
-                      {(['名称/代码', '成本', '已实现盈亏', '清仓时间'] as const).map((h, i) => (
+                      {(['名称/代码', '成本', '已实现盈亏', '清仓时间', '资金到账'] as const).map((h, i) => (
                         <th key={h} onClick={() => setClosedSort(cs => ({ col: i, dir: cs.col === i && cs.dir === 'asc' ? 'desc' : 'asc' }))}
                           className="px-3 py-2 text-left font-medium cursor-pointer select-none hover:text-foreground">
                           {h}{closedSort.col === i && <span className="ml-0.5 text-accent">{closedSort.dir === 'asc' ? '↑' : '↓'}</span>}
@@ -2101,7 +2101,7 @@ export function Holdings() {
                   </thead>
                   <tbody>
                     {[...closedRows].sort((a, b) => {
-                      const keys: (keyof HoldingRow)[] = ['name', 'avg_cost', 'realized_pnl', 'closed_at']
+                      const keys: (keyof HoldingRow)[] = ['symbol', 'avg_cost', 'realized_pnl', 'closed_at', 'settle_date']
                       const k = keys[closedSort.col]
                       const va = (a[k] ?? 0) as string | number
                       const vb = (b[k] ?? 0) as string | number
@@ -2123,6 +2123,15 @@ export function Holdings() {
                         <td className="px-3 py-2 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
                         <td className={`px-3 py-2 tabular-nums font-medium ${pnlColor(r.realized_pnl)}`}>{fmtMoney(r.realized_pnl)}</td>
                         <td className="px-3 py-2 tabular-nums text-muted text-xs">{r.closed_at?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                        <td className="px-3 py-2 tabular-nums text-xs">
+                          {r.symbol.endsWith('.HK') ? (
+                            r.settle_date ? (
+                              <span className="text-sky-400" title="港股通卖出资金 T+2 交易日交收到账 (卖出时先冻结, 节假日顺延, 按账本交易日历推算)">
+                                {r.settle_date}
+                              </span>
+                            ) : <span className="text-muted">推算中…</span>
+                          ) : <span className="text-muted">—</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

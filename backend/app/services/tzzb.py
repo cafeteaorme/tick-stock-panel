@@ -1089,6 +1089,68 @@ def _trades_stale(max_hours: float = 12.0) -> bool:
         return True
 
 
+# ---------------------------------------------------------------- 港股通交收推算
+
+_TD_CACHE: dict[str, dict] = {}
+
+
+def trading_day_info(date_iso: str) -> dict | None:
+    """指定日期的两地交易日信息 (账本 last_trading_day 接口, 进程内缓存)。"""
+    if date_iso in _TD_CACHE:
+        return _TD_CACHE[date_iso]
+    cookie = _cdp_cookie()
+    try:
+        ex = _api("/caishen_fund/stock_common/v1/last_trading_day", cookie, {"date": date_iso})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("trading_day_info %s failed: %s", date_iso, e)
+        return None
+    info = {
+        "cn": bool(int(ex.get("is_trading_day") or 0)),
+        "hk": bool(int(ex.get("is_hk_trading_day") or 0)),
+        "next_cn": ex.get("next_trading_day"),
+        "next_hk": ex.get("next_hk_trading_day"),
+    }
+    _TD_CACHE[date_iso] = info
+    return info
+
+
+def settle_date_after(sell_date: str, n: int = 2, market: str = "cn") -> str | None:
+    """港股通卖出资金到账日: 卖出日后第 n 个交易日 (T+n 交收)。
+
+    人民币资金按 A 股日历交收 (market="cn"), 节假日顺延; 接口不可用时退化为跳过周末。
+    """
+    from datetime import date as _date, timedelta
+
+    try:
+        d = _date.fromisoformat(sell_date)
+    except ValueError:
+        return None
+    seen = 0
+    for i in range(1, 45):
+        cand = (d + timedelta(days=i))
+        info = trading_day_info(cand.isoformat())
+        ok = info[market] if info else cand.weekday() < 5
+        if not ok:
+            continue
+        seen += 1
+        if seen >= n:
+            return cand.isoformat()
+    return None
+
+
+def ledger_sell_date(account_name: str | None, symbol: str) -> str | None:
+    """从成交缓存派生的清仓轮次中查该 (账户, 股票) 最近一次清仓卖出日。"""
+    obj = load_trades_cache()
+    best = None
+    for c in obj.get("cleared") or []:
+        if account_name and c.get("account_name") != account_name:
+            continue
+        if c.get("symbol") == symbol and c.get("last_sell"):
+            if best is None or c["last_sell"] > best:
+                best = c["last_sell"]
+    return best
+
+
 # ---------------------------------------------------------------- AI 报告持久化
 
 

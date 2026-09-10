@@ -349,9 +349,25 @@ def list_holdings(request: Request, include_closed: bool = Query(False), account
     symbols = [r["symbol"] for r in open_rows]
     enriched = _enrich_rows(open_rows, rates, repo.get_name_map(symbols), _market_rows(request, symbols, rates))
     if include_closed:
+        from app.services import tzzb
+
         closed_raw = [r for r in rows if r.get("status") == "closed"]
         nm = request.app.state.repo.get_name_map([r["symbol"] for r in closed_raw])
-        enriched = enriched + [{**r, "name": nm.get(r["symbol"])} for r in closed_raw]
+        acc_obj = holdings_service.list_accounts()
+        acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), None)
+        closed_out = []
+        for r in closed_raw:
+            r = {**r, "name": nm.get(r["symbol"])}
+            # 港股通卖出资金 T+2 交易日交收 (先冻结后划付): 从卖出日向后推算到账日
+            if r["symbol"].endswith(".HK"):
+                sell_d = (r.get("closed_at") or "")[:10]
+                if not sell_d:
+                    sell_d = tzzb.ledger_sell_date(acc_name, r["symbol"]) or ""
+                if sell_d:
+                    r["sell_date"] = sell_d
+                    r["settle_date"] = tzzb.settle_date_after(sell_d, 2, "cn")
+            closed_out.append(r)
+        enriched = enriched + closed_out
     return {"rows": enriched, "account": acc}
 
 
