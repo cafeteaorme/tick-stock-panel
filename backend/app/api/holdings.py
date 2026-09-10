@@ -408,11 +408,14 @@ def update_portfolio(req: PortfolioRequest, request: Request, account: str | Non
 
 @router.post("/reset")
 def reset_data(request: Request, req: ResetRequest | None = None, account: str | None = Query(None)):
-    """重置: 清除投资账本 Cookie 配置 + 删除账本同步生成的全部账户 (持仓/快照/资金)。"""
-    from app.services import tzzb
-
-    res = tzzb.reset_tzzb(holdings_service)
-    return {"ok": True, **res}
+    """重置当前账户: 清空持仓与快照 (可选资金设置)。"""
+    acc = _acc(request, account)
+    include_pf = bool(req.include_portfolio) if req else True
+    removed = holdings_service.reset(acc, include_pf)
+    _invalid_mkt_cache()
+    acc_obj = holdings_service.list_accounts()
+    name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), acc)
+    return {"ok": True, "account": name, "removed": removed}
 
 
 @router.post("/import")

@@ -263,7 +263,8 @@ def upsert(account_id: str, symbol: str, qty: float,
         "source": source,
     }
     for k, v in (extras or {}).items():
-        if k in _SCHEMA and k not in row:
+        # extras 可覆盖默认值 (尤其 status/closed_at: 账本报 qty=0 且本地无持仓 → 直接落为已清仓行)
+        if k in _SCHEMA:
             row[k] = v
     out = pl.concat([pl.DataFrame([row], schema=_SCHEMA), df], how="diagonal_relaxed")
     _write(account_id, out)
