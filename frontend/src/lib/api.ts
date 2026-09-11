@@ -1509,7 +1509,9 @@ export const api = {
   holdingsTzzbTrades: () =>
     request<{ ok: boolean; fetched_at?: string; accounts: { fund_key: string; name: string; trades: number }[]; n_trades: number; n_cleared: number; n_bank: number }>('/api/holdings/tzzb/trades'),
   holdingsTzzbTradesRefresh: () =>
-    request<{ ok: boolean; message?: string }>('/api/holdings/tzzb/trades/refresh', { method: 'POST' }),
+    request<{ started: boolean; status?: string }>('/api/holdings/tzzb/trades/refresh', { method: 'POST' }),
+  holdingsTzzbJobs: () =>
+    request<{ jobs: { key: string; label?: string; status: string; ok?: boolean | null; message?: string; started_at?: string; finished_at?: string }[] }>('/api/holdings/tzzb/jobs'),
   holdingsTzzbClearedCheck: (account?: string) =>
     request<{ ok: boolean; account?: string; matched: string[]; local_only: string[]; ledger_only: { symbol: string; name?: string; last_sell?: string; profit?: number }[] }>(
       `/api/holdings/tzzb/cleared-check${account ? `?account=${encodeURIComponent(account)}` : ''}`,

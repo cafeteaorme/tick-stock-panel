@@ -948,13 +948,7 @@ def _norm_trade(r: dict, acc_name: str) -> dict | None:
         return None
     dt = str(r.get("transDateTime") or "")
     op = str(r.get("op") or "")
-    moneychg = _f_pl(r.get("moneychg"))
-    # 撤单/冲正识别: 资金流向与买卖方向矛盾 (真实买入 moneychg<0, 卖出 >0)
-    if moneychg is not None:
-        if op == "1" and moneychg > 0:
-            return None
-        if op == "2" and moneychg < 0:
-            return None
+    # 注意: moneychg 符号不可靠 (真实买入也可能为正), 方向以 op 为准, 不做资金符号过滤
     qty = _f_pl(r.get("trans_count"))
     return {
         "account_id": str(r.get("account_id") or ""),
@@ -1104,6 +1098,44 @@ def _trades_stale(max_hours: float = 12.0) -> bool:
         return (datetime.utcnow() - dt).total_seconds() > max_hours * 3600
     except Exception:  # noqa: BLE001
         return True
+
+
+# ---------------------------------------------------------------- 后台任务状态
+
+_JOBS: dict[str, dict] = {}
+
+
+def _job_run(key: str, label: str, fn) -> dict:
+    """后台线程执行 fn, 状态记入 _JOBS[key]; 同名任务运行中则拒绝重复启动。"""
+    import threading
+
+    st = _JOBS.setdefault(key, {"key": key, "label": label})
+    if st.get("status") == "running":
+        return {"started": False, **_job_state(st)}
+    st.update({"status": "running", "label": label, "ok": None, "message": "拉取中…",
+               "started_at": datetime.utcnow().isoformat(timespec="seconds"),
+               "finished_at": None})
+
+    def _wrap():
+        try:
+            res = fn()
+            st.update({"status": "done", "ok": bool(res.get("ok", True)) if isinstance(res, dict) else True,
+                       "message": str(res.get("message") or "完成") if isinstance(res, dict) else "完成",
+                       "finished_at": datetime.utcnow().isoformat(timespec="seconds")})
+        except Exception as e:  # noqa: BLE001
+            st.update({"status": "done", "ok": False, "message": f"失败: {e}",
+                       "finished_at": datetime.utcnow().isoformat(timespec="seconds")})
+
+    threading.Thread(target=_wrap, daemon=True).start()
+    return {"started": True, **_job_state(st)}
+
+
+def _job_state(st: dict) -> dict:
+    return {k: st.get(k) for k in ("key", "label", "status", "ok", "message", "started_at", "finished_at")}
+
+
+def job_states() -> list[dict]:
+    return [_job_state(st) for st in _JOBS.values()]
 
 
 # ---------------------------------------------------------------- 港股通交收推算

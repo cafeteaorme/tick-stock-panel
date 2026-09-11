@@ -732,13 +732,10 @@ def tzzb_history_status():
 
 @router.post("/tzzb/history")
 def tzzb_history_fetch():
-    """拉取投资账本日/月/年收益全历史并缓存。"""
+    """拉取投资账本历史收益 (后台任务, /tzzb/jobs 查进度)。"""
     from app.services import tzzb
 
-    try:
-        return tzzb.fetch_history_cache()
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "message": f"历史拉取失败: {e}"}
+    return tzzb._job_run("history", "历史收益", tzzb.fetch_history_cache)
 
 
 @router.post("/tzzb/sync")
@@ -1008,13 +1005,18 @@ def tzzb_trades(symbol: str | None = Query(None)):
 
 @router.post("/tzzb/trades/refresh")
 def tzzb_trades_refresh():
-    """立即拉取账本真实成交 (全账户, 约 10s)。"""
+    """立即拉取账本真实成交 (后台任务, /tzzb/jobs 查进度)。"""
     from app.services import tzzb
 
-    try:
-        return tzzb.fetch_trades_cache()
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "message": f"成交拉取失败: {e}"}
+    return tzzb._job_run("trades", "真实成交", tzzb.fetch_trades_cache)
+
+
+@router.get("/tzzb/jobs")
+def tzzb_jobs():
+    """后台拉取任务状态 (进度轮询)。"""
+    from app.services import tzzb
+
+    return {"jobs": tzzb.job_states()}
 
 
 @router.get("/tzzb/cleared-check")

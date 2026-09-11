@@ -1342,16 +1342,62 @@ function renderMd(text: string): React.ReactNode[] {
   })
 }
 
+type TzzbJob = { key: string; label?: string; status: string; ok?: boolean | null; message?: string; started_at?: string; finished_at?: string }
+
 function BgTasksPanel({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const tasks = useQuery({ queryKey: ['holdings-bg-tasks'], queryFn: api.holdingsBgTasks, refetchInterval: 30_000 })
   const trades = useQuery({ queryKey: ['holdings-tzzb-trades'], queryFn: api.holdingsTzzbTrades })
-  const [busy, setBusy] = useState('')
-  const run = async (label: string, fn: () => Promise<unknown>) => {
-    setBusy(label)
-    try { await fn(); toast(`${label}完成`, 'success'); qc.invalidateQueries() }
-    catch { toast(`${label}失败`, 'error') }
-    finally { setBusy('') }
+  // 拉取任务状态轮询: 运行中 1.5s, 空闲 8s; 运行→完成沿触发业务数据刷新与提示
+  const prevStatus = useRef<Record<string, string>>({})
+  const jobsQ = useQuery({
+    queryKey: ['holdings-tzzb-jobs'],
+    queryFn: api.holdingsTzzbJobs,
+    refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) => {
+      const jobs = q.state.data?.jobs ?? []
+      for (const j of jobs) {
+        const was = prevStatus.current[j.key]
+        if (was === 'running' && j.status === 'done') {
+          qc.invalidateQueries()
+          if (j.ok) toast(`${j.label || j.key}拉取完成：${j.message || ''}`, 'success')
+          else toast(`${j.label || j.key}失败：${j.message || ''}`, 'error')
+        }
+        prevStatus.current[j.key] = j.status
+      }
+      return jobs.some(j => j.status === 'running') ? 1_500 : 8_000
+    },
+  })
+  const jobs = jobsQ.data?.jobs ?? []
+  const jobOf = (k: string) => jobs.find(j => j.key === k)
+  const running = (k: string) => jobOf(k)?.status === 'running'
+  const start = (key: 'trades' | 'history', fn: () => Promise<unknown>) => {
+    if (running(key)) return
+    Promise.resolve(fn()).catch(() => toast('任务启动失败', 'error'))
+    qc.invalidateQueries({ queryKey: ['holdings-tzzb-jobs'] })
+  }
+  const JobRow = ({ k, btn }: { k: 'trades' | 'history'; btn: string }) => {
+    const j = jobOf(k)
+    const isRun = j?.status === 'running'
+    return (
+      <div className="space-y-1">
+        <div className="flex gap-2">
+          <button disabled={isRun} onClick={() => start(k, k === 'trades' ? () => api.holdingsTzzbTradesRefresh() : () => api.holdingsTzzbHistoryFetch())}
+            className="flex-1 px-2 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40">
+            {isRun ? '拉取中…' : btn}
+          </button>
+        </div>
+        {isRun && (
+          <div className="h-1 rounded-full bg-elevated overflow-hidden">
+            <div className="h-full w-1/3 rounded-full bg-accent/70 animate-[tfjob_1.2s_ease-in-out_infinite_alternate]" />
+          </div>
+        )}
+        {j?.status === 'done' && (
+          <div className={`text-[11px] ${j.ok ? 'text-emerald-400' : 'text-danger'}`}>
+            {j.ok ? '✓' : '✗'} {j.message}{j.finished_at ? ` · ${j.finished_at.slice(11, 19)}` : ''}
+          </div>
+        )}
+      </div>
+    )
   }
   return (
     <div className="fixed inset-0 z-50" onClick={onClose}>
@@ -1381,16 +1427,8 @@ function BgTasksPanel({ onClose }: { onClose: () => void }) {
           {trades.data && (
             <div className="text-[11px] text-muted">{trades.data.accounts.map(a => `${a.name}: ${a.trades}`).join(' · ')}</div>
           )}
-          <div className="flex gap-2 pt-0.5">
-            <button disabled={!!busy} onClick={() => run('成交拉取', () => api.holdingsTzzbTradesRefresh())}
-              className="flex-1 px-2 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40">
-              {busy === '成交拉取' ? '拉取中…' : '立即拉取真实成交'}
-            </button>
-            <button disabled={!!busy} onClick={() => run('历史拉取', () => api.holdingsTzzbHistoryFetch())}
-              className="flex-1 px-2 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40">
-              {busy === '历史拉取' ? '拉取中…' : '立即拉取历史收益'}
-            </button>
-          </div>
+          <JobRow k="trades" btn="立即拉取真实成交" />
+          <JobRow k="history" btn="立即拉取历史收益" />
         </div>
       </div>
     </div>
