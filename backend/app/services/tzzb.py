@@ -205,6 +205,16 @@ _SYNC_CHECK_S = 20
 _sync_thread: threading.Thread | None = None
 _sync_stop = threading.Event()
 _synced_marker = ""  # "date:slot" 防同日同时点重复执行
+_INTRADAY_SYNC_S = 30 * 60  # 盘中加密同步间隔 (交易时段每 30 分钟)
+_last_intraday_sync = 0.0
+
+
+def _in_trading_session() -> bool:
+    """A 股交易时段 (含集合竞价与收盘缓冲): 9:25-11:35 / 12:55-15:05。"""
+    from datetime import time as _time
+
+    now = datetime.now(CN_TZ).time()
+    return (_time(9, 25) <= now <= _time(11, 35)) or (_time(12, 55) <= now <= _time(15, 5))
 
 
 def start_background_sync() -> bool:
@@ -215,13 +225,24 @@ def start_background_sync() -> bool:
     _sync_stop.clear()
 
     def _loop() -> None:
-        global _synced_marker
+        global _synced_marker, _last_intraday_sync
+        import time as _time
+
         from app.market_time import CN_TZ
 
         while not _sync_stop.wait(_SYNC_CHECK_S):
             try:
                 now = datetime.now(CN_TZ)
                 if now.weekday() >= 5:  # 周末
+                    continue
+                # 盘中加密同步: 交易时段每 30 分钟拉一次, 减少账本持仓列表盘中滞后
+                if (_in_trading_session() and _time.time() - _last_intraday_sync >= _INTRADAY_SYNC_S
+                        and (_cdp_port_alive() or (load_config().get("cookie") or "").strip())):
+                    _last_intraday_sync = _time.time()
+                    if is_trading_day_today():
+                        res = sync()
+                        fetch_hk_rate()
+                        logger.info("tzzb intraday sync %s: %s", now.strftime("%H:%M"), res.get("message", "")[:120])
                     continue
                 slot = (now.hour, now.minute)
                 if slot not in _SYNC_SLOTS:
