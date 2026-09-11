@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
-import { chartTheme, getTheme, useTheme } from '@/lib/theme'
+import { BULL, BEAR, chartTheme, getTheme, useTheme, withAlpha } from '@/lib/theme'
 import * as echarts from 'echarts'
 import type { ECharts, EChartsOption } from 'echarts'
 
@@ -142,7 +142,7 @@ export const SUB_CHARTS: SubChartDef[] = [
               value: d.volume ?? 0,
               volumeRatioLabel: ratio == null ? '' : fmtVolumeRatio(ratio, 1),
               itemStyle: {
-                color: d.close >= d.open ? 'rgba(240,68,56,0.6)' : 'rgba(18,183,106,0.6)',
+                color: d.close >= d.open ? withAlpha(BULL, 0.6) : withAlpha(BEAR, 0.6),
               },
             }
           }),
@@ -180,7 +180,7 @@ export const SUB_CHARTS: SubChartDef[] = [
     buildInfo: (d) => {
       if (!d) return []
       return [
-        { label: '量', color: d.close >= d.open ? '#C74040' : '#2D9B65', value: fmtVol(d.volume) },
+        { label: '量', color: d.close >= d.open ? BULL : BEAR, value: fmtVol(d.volume) },
       ]
     },
   },
@@ -213,7 +213,7 @@ export const SUB_CHARTS: SubChartDef[] = [
           if (v == null) return '-'
           return {
             value: Number(v),
-            itemStyle: { color: Number(v) >= 0 ? 'rgba(240,68,56,0.6)' : 'rgba(18,183,106,0.6)' },
+            itemStyle: { color: Number(v) >= 0 ? withAlpha(BULL, 0.6) : withAlpha(BEAR, 0.6) },
           }
         }),
         barWidth: '40%',
@@ -225,7 +225,7 @@ export const SUB_CHARTS: SubChartDef[] = [
       return [
         { label: 'DIF', color: '#FACC15', value: d.macd_dif != null ? d.macd_dif.toFixed(3) : '—' },
         { label: 'DEA', color: '#8B5CF6', value: d.macd_dea != null ? d.macd_dea.toFixed(3) : '—' },
-        { label: 'MACD', color: d.macd_hist != null && d.macd_hist >= 0 ? '#C74040' : '#2D9B65', value: d.macd_hist != null ? d.macd_hist.toFixed(3) : '—' },
+        { label: 'MACD', color: d.macd_hist != null && d.macd_hist >= 0 ? BULL : BEAR, value: d.macd_hist != null ? d.macd_hist.toFixed(3) : '—' },
       ]
     },
   },
@@ -342,10 +342,10 @@ interface Props {
 
 // 序列颜色 (双主题通用); 画布轴/网格/文字等主题相关色走 CT() 动态取
 const THEME = {
-  bull: '#C74040',
-  bear: '#2D9B65',
-  bullAlpha: 'rgba(240,68,56,0.7)',
-  bearAlpha: 'rgba(18,183,106,0.7)',
+  bull: BULL,
+  bear: BEAR,
+  bullAlpha: withAlpha(BULL, 0.7),
+  bearAlpha: withAlpha(BEAR, 0.7),
   ma5: '#A1A1AA',
   ma10: '#3B82F6',
   ma20: '#F97316',
@@ -395,7 +395,7 @@ function buildSubInfoGraphics(
         const ratio = volumeRatioAt(data, infoIdx, volumeCompare.days)
         items.push({
           label: `量比${volumeCompare.days}`,
-          color: ratio != null && ratio >= 1 ? '#C74040' : '#2D9B65',
+          color: ratio != null && ratio >= 1 ? BULL : BEAR,
           value: fmtVolumeRatio(ratio),
         })
       }

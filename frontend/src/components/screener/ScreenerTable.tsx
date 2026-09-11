@@ -221,7 +221,7 @@ export function ScreenerTable({
                 className={`flex items-center gap-2 text-left ${isExpired ? 'cursor-default' : ''}`}
               >
                 {board ? (
-                  <span className={`shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border ${board.color}`}>
+                  <span className={`shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-bold leading-none border ${board.color}`}>
                     {board.label}
                   </span>
                 ) : (
@@ -237,7 +237,7 @@ export function ScreenerTable({
                 )}
               </button>
               {isExpired ? (
-                <span className="shrink-0 inline-flex items-center px-1.5 py-px rounded text-[9px] font-medium leading-tight bg-red-500/10 text-red-400/60 border border-red-500/15">
+                <span className="shrink-0 inline-flex items-center px-1.5 py-px rounded text-[10px] font-medium leading-tight bg-red-500/10 text-red-400/60 border border-red-500/15">
                   失效
                 </span>
               ) : (

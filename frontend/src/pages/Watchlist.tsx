@@ -35,6 +35,7 @@ import {
   saveColumnConfig,
   buildExtColumnsParam,
 } from '@/lib/watchlist-columns'
+import { ErrorBanner, LoadingSkeleton } from '@/components/LoadingState'
 
 // ===== 板块标识（筛选/卡片用） =====
 // 注: boardTag（创/科/北 标签）已移至共享 @/components/stock-table/primitives
@@ -482,20 +483,20 @@ const StockCard = React.memo(function StockCard({
             <span className="text-xs text-secondary truncate">{name}</span>
           )}
           {board && (
-            <span className={`shrink-0 inline-flex items-center justify-center px-1 h-[16px] rounded text-[9px] font-bold leading-none ${board.color}`}>
+            <span className={`shrink-0 inline-flex items-center justify-center px-1 h-[16px] rounded text-[10px] font-bold leading-none ${board.color}`}>
               {board.label}
             </span>
           )}
           {r.holding_qty != null && r.holding_qty > 0 && (
             <span
               title={`我的持仓 ${r.holding_qty} 股${r.holding_cost ? ` · 成本 ${r.holding_cost}` : ''}`}
-              className="shrink-0 inline-flex items-center gap-0.5 px-1 h-[16px] rounded border border-violet-500/30 bg-violet-500/12 text-violet-400 text-[9px] font-bold leading-none"
+              className="shrink-0 inline-flex items-center gap-0.5 px-1 h-[16px] rounded border border-violet-500/30 bg-violet-500/12 text-violet-400 text-[10px] font-bold leading-none"
             >
               持{r.holding_qty >= 10000 ? `${(r.holding_qty / 10000).toFixed(1)}万` : Math.round(r.holding_qty)}
             </span>
           )}
           {r.consecutive_limit_ups > 0 && (
-            <span className="shrink-0 inline-flex items-center justify-center px-1 h-[16px] rounded bg-danger/15 text-danger text-[9px] font-bold tabular-nums">
+            <span className="shrink-0 inline-flex items-center justify-center px-1 h-[16px] rounded bg-danger/15 text-danger text-[10px] font-bold tabular-nums">
               {r.consecutive_limit_ups === 1 ? '首板' : `${r.consecutive_limit_ups}连`}
             </span>
           )}
@@ -554,12 +555,12 @@ const StockCard = React.memo(function StockCard({
       {signals.length > 0 && (
         <div className="pl-4 pr-2.5 pt-1.5 pb-2 flex flex-wrap gap-1">
           {signals.slice(0, 3).map(s => (
-            <span key={s.label} className={`inline-block px-1.5 py-[1px] rounded text-[9px] font-medium leading-tight ${signalCls(s.type)}`}>
+            <span key={s.label} className={`inline-block px-1.5 py-[1px] rounded text-[10px] font-medium leading-tight ${signalCls(s.type)}`}>
               {s.label}
             </span>
           ))}
           {signals.length > 3 && (
-            <span className="inline-block px-1 py-[1px] rounded text-[9px] text-muted bg-elevated leading-tight">
+            <span className="inline-block px-1 py-[1px] rounded text-[10px] text-muted bg-elevated leading-tight">
               +{signals.length - 3}
             </span>
           )}
@@ -1190,13 +1191,10 @@ export function Watchlist() {
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-5 py-3">
           {/* 列表 */}
-          {list.isLoading && <div className="text-sm text-muted">加载中…</div>}
-          {list.isError && <div className="text-sm text-danger">读取自选失败</div>}
+          {list.isLoading && <LoadingSkeleton height={220} rows={7} />}
+          {list.isError && <ErrorBanner message="读取自选失败" onRetry={() => list.refetch()} />}
           {!list.isLoading && enriched.isError && (
-            <div className="flex items-center gap-2 rounded-btn border border-danger/30 bg-danger/5 px-3 py-2 my-2">
-              <span className="text-xs text-danger flex-1">行情数据加载失败</span>
-              <button onClick={() => enriched.refetch()} className="px-2.5 py-1 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground">重试</button>
-            </div>
+            <div className="my-2"><ErrorBanner message="行情数据加载失败" onRetry={() => enriched.refetch()} /></div>
           )}
 
           {allSymbols.length === 0 ? (
@@ -1306,20 +1304,20 @@ export function Watchlist() {
                             </span>
                           )}
                           {board ? (
-                            <span className={`shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border ${board.color}`}>
+                            <span className={`shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-bold leading-none border ${board.color}`}>
                               {board.label}
                             </span>
                           ) : null}
                           {region === 'HK' && (
-                            <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border border-amber-500/25 bg-amber-500/12 text-amber-500">港</span>
+                            <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-bold leading-none border border-amber-500/25 bg-amber-500/12 text-amber-500">港</span>
                           )}
                           {region === 'US' && (
-                            <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border border-sky-500/25 bg-sky-500/12 text-sky-400">US</span>
+                            <span className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-bold leading-none border border-sky-500/25 bg-sky-500/12 text-sky-400">US</span>
                           )}
                           {r.holding_qty != null && r.holding_qty > 0 && (
                             <span
                               title={`我的持仓 ${r.holding_qty} 股${r.holding_cost ? ` · 成本 ${r.holding_cost}` : ''}`}
-                              className="shrink-0 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
+                              className="shrink-0 inline-flex items-center gap-0.5 px-1 py-px rounded text-[10px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
                             >
                               持{r.holding_qty >= 10000 ? `${(r.holding_qty / 10000).toFixed(1)}万` : Math.round(r.holding_qty)}
                             </span>

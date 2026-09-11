@@ -123,7 +123,7 @@ export function StrategyCard({
           <button onClick={onRun} disabled={disabled}
             className="flex flex-col items-start cursor-pointer disabled:opacity-50 disabled:cursor-wait w-full">
             <div className="flex items-center gap-1.5 max-w-full">
-              <span className={`text-[9px] px-1 py-px rounded border font-medium leading-tight shrink-0 ${badgeCls}`}>{srcLabel}</span>
+              <span className={`text-[10px] px-1 py-px rounded border font-medium leading-tight shrink-0 ${badgeCls}`}>{srcLabel}</span>
               <span className="text-xs font-medium truncate text-foreground">{name}</span>
             </div>
             {description && (
@@ -162,7 +162,7 @@ export function StrategyCard({
           <button onClick={onRun} disabled={disabled}
             className="flex flex-col items-start cursor-pointer disabled:opacity-50 disabled:cursor-wait min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className={`text-[9px] px-1 py-px rounded border font-medium leading-tight shrink-0 ${badgeCls}`}>{srcLabel}</span>
+              <span className={`text-[10px] px-1 py-px rounded border font-medium leading-tight shrink-0 ${badgeCls}`}>{srcLabel}</span>
               <span className="text-xs font-medium truncate text-foreground">{name}</span>
               {count != null && !loading && (
                 <span className={`text-xs font-mono font-bold tabular-nums shrink-0 ${countCls}`}>{count}</span>
@@ -174,7 +174,7 @@ export function StrategyCard({
                 <span className="text-[10px] text-muted leading-tight line-clamp-1 max-w-[120px]">{description}</span>
               )}
               {hasExpired && (
-                <span className="text-[9px] font-mono text-red-400/80">{'-' + expiredCount}</span>
+                <span className="text-[10px] font-mono text-red-400/80">{'-' + expiredCount}</span>
               )}
             </div>
           </button>
@@ -195,13 +195,13 @@ export function StrategyCard({
         <>
           <button onClick={onRun} disabled={disabled}
             className="flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-wait">
-            <span className="text-[8px] px-0.5 rounded bg-secondary/10 text-muted border border-border font-medium leading-tight">{srcLabel}</span>
+            <span className="text-[10px] px-0.5 rounded bg-secondary/10 text-muted border border-border font-medium leading-tight">{srcLabel}</span>
             <span className="text-[10px] font-medium whitespace-nowrap text-foreground">{name}</span>
             {count != null && !loading && (
               <span className={`text-xs font-mono font-bold tabular-nums ${countCls}`}>{count}</span>
             )}
             {hasExpired && (
-              <span className="text-[9px] font-mono text-red-400/70">{'-' + expiredCount}</span>
+              <span className="text-[10px] font-mono text-red-400/70">{'-' + expiredCount}</span>
             )}
             {loading && <span className="w-4 h-2.5 rounded bg-elevated animate-pulse" />}
           </button>

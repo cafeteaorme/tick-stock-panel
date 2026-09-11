@@ -252,7 +252,7 @@ export function ExtDataPullPanel({ config, onSaved }: {
                 {pull.last_message || (pull.last_status === 'success' ? '成功' : '失败')}
               </div>
               {fmtTime(pull.last_run) && (
-                <div className="text-[9px] text-muted">{fmtTime(pull.last_run)}</div>
+                <div className="text-[10px] text-muted">{fmtTime(pull.last_run)}</div>
               )}
             </div>
           </div>
@@ -309,7 +309,7 @@ export function ExtDataPullPanel({ config, onSaved }: {
             <div className="text-[10px] text-amber-500">数据缺少 symbol 字段，请配置字段映射</div>
           )}
           {testResult.preview.length > 0 && (
-            <pre className="text-[9px] font-mono text-muted bg-elevated rounded px-2 py-1.5 overflow-x-auto max-h-32">
+            <pre className="text-[10px] font-mono text-muted bg-elevated rounded px-2 py-1.5 overflow-x-auto max-h-32">
               {JSON.stringify(testResult.preview, null, 2)}
             </pre>
           )}

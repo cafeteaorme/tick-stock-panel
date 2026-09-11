@@ -26,6 +26,13 @@ export const QK = {
   holdings:             ['holdings'] as const,
   holdingsSummary:      ['holdings-summary'] as const,
   holdingsPnl:          (start?: string) => ['holdings-pnl', start ?? 'default'] as const,
+  // 账本后台任务/同花顺同步 (页面级常驻轮询, 见 Holdings.tsx)
+  holdingsBgTasks:        ['holdings-bg-tasks'] as const,
+  holdingsTzzbTrades:     ['holdings-tzzb-trades'] as const,
+  holdingsTzzbJobs:       ['holdings-tzzb-jobs'] as const,
+  holdingsTzzbStatus:     ['holdings-tzzb-status'] as const,
+  // invalidate 不带参时按前缀匹配, 可同时失效带 activeAcc 的参数化 key
+  holdingsTzzbClearedCheck: (acc?: string) => ['holdings-tzzb-cleared-check', acc] as const,
   watchlistQuotes:      ['watchlist-quotes'] as const,
   watchlistEnriched:    (ext?: string) => ['watchlist-enriched', ext] as const,
   watchlistKlineBatch:  (symbols: string) => ['watchlist-kline-batch', symbols] as const,
@@ -81,6 +88,7 @@ export const QK = {
   monitorRules:         ['monitor-rules'] as const,
   monitorRuleOptions:   ['monitor-rule-options'] as const,
   alerts:               (source?: string) => ['alerts', source ?? ''] as const,
+  alertsTotal:          ['alerts-total'] as const,
 
   // AI 大盘复盘
   reviewReports:        ['review-reports'] as const,

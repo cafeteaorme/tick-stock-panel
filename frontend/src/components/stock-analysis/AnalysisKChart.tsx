@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo, useState } from 'react'
-import { chartTheme, getTheme, useTheme } from '@/lib/theme'
+import { BULL, BEAR, chartTheme, getTheme, useTheme } from '@/lib/theme'
 import * as echarts from 'echarts'
 import type { ECharts, EChartsOption } from 'echarts'
 import type { KlineRow, LevelSeries } from '@/lib/api'
@@ -21,8 +21,8 @@ import type { KlineRow, LevelSeries } from '@/lib/api'
 
 // ===== 配色(红涨绿跌, 双主题通用); 画布轴/网格主题相关色走 CT() =====
 const THEME = {
-  bull: '#C74040',
-  bear: '#2D9B65',
+  bull: BULL,
+  bear: BEAR,
   volUp: 'rgba(240,68,56,0.5)',
   volDown: 'rgba(18,183,106,0.5)',
 }
@@ -540,7 +540,7 @@ function LevelOverview({
         <span className="h-1.5 w-1.5 rounded-full shrink-0 transition-transform" style={{ backgroundColor: color, transform: hit ? 'scale(1.5)' : 'scale(1)' }} />
         <span className={`text-[11px] w-24 shrink-0 truncate ${hit ? 'text-foreground font-medium' : 'text-secondary'}`}>{p.label}</span>
         <span className={`text-[11px] font-mono ${hit ? 'text-foreground font-bold' : 'text-foreground'}`}>{p.value.toFixed(2)}</span>
-        <span className="text-[9px] font-mono text-muted">{fmtPct(p.value)}</span>
+        <span className="text-[10px] font-mono text-muted">{fmtPct(p.value)}</span>
       </div>
     )
   }

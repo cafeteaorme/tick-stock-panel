@@ -15,6 +15,7 @@ import { useTheme } from '@/lib/theme'
 import { useCapabilities, usePreferences } from '@/lib/useSharedQueries'
 import { SealedBadge } from '@/components/SealedBadge'
 import type { ExtColumnDisplayConfig } from '@/lib/watchlist-columns'
+import { LoadingSkeleton } from '@/components/LoadingState'
 
 // ===== Ext 字段配置 =====
 
@@ -250,7 +251,7 @@ const StockCard = React.memo(function StockCard({ stock, extFields, direction, s
   // badgeText 可能是函数(涨跌停共用 status 如 failed/broken)
   const badgeText = typeof style.badgeText === 'function' ? style.badgeText(direction) : style.badgeText
 
-  const tagCls = 'text-[9px] leading-none px-1 py-px rounded-sm'
+  const tagCls = 'text-[10px] leading-none px-1 py-px rounded-sm'
   const conceptCls = 'text-[10px] leading-none px-1.5 py-0.5 rounded-sm text-orange-800 bg-orange-100/80 dark:text-orange-200/60 dark:bg-orange-400/[0.05]'
   const industryCls = 'text-[10px] leading-none px-1.5 py-0.5 rounded-sm text-sky-800 bg-sky-100/80 dark:text-sky-300/90 dark:bg-sky-400/10'
   const textCls = `${tagCls} text-secondary bg-elevated/60 dark:text-secondary/60`
@@ -312,14 +313,14 @@ const StockCard = React.memo(function StockCard({ stock, extFields, direction, s
       <div className="flex items-center gap-1.5 w-full min-w-0 pr-4">
         <span className={`${style.nameCls} font-medium truncate`}>{stock.name}</span>
         {stock.is_one_word && (
-          <span className={`shrink-0 rounded-sm border px-1 py-px text-[9px] font-medium leading-none ${
+          <span className={`shrink-0 rounded-sm border px-1 py-px text-[10px] font-medium leading-none ${
             direction === 'down'
               ? 'border-bear/25 bg-bear/10 text-bear'
               : 'border-bull/25 bg-bull/10 text-bull'
           }`}>一字</span>
         )}
         {tag && (
-          <span className={`shrink-0 text-[9px] px-1 py-px rounded-full border leading-none ${tag.cls}`}>{tag.label}</span>
+          <span className={`shrink-0 text-[10px] px-1 py-px rounded-full border leading-none ${tag.cls}`}>{tag.label}</span>
         )}
       </div>
       {/* 代码 + 数字行 */}
@@ -339,7 +340,7 @@ const StockCard = React.memo(function StockCard({ stock, extFields, direction, s
                 : fmtSealVol(stock.sealed_vol)}
             </span>
           ) : stock.sealed_status === 'pending' ? (
-            <span className="text-[9px] text-yellow-500/60 leading-none">待确认</span>
+            <span className="text-[10px] text-yellow-500/60 leading-none">待确认</span>
           ) : (
             /* 未修正: 显示连板数 */
             <span className="text-[10px] font-semibold tabular-nums text-accent/80">
@@ -347,7 +348,7 @@ const StockCard = React.memo(function StockCard({ stock, extFields, direction, s
             </span>
           )}
           {badgeText && (
-            <span className={`text-[9px] font-medium ${style.badge}`}>{badgeText}</span>
+            <span className={`text-[10px] font-medium ${style.badge}`}>{badgeText}</span>
           )}
         </span>
       </div>
@@ -1020,7 +1021,7 @@ function TierGroup({ tier, defaultOpen, extFields, filterKeys, bf, onStockClick,
               <div className="px-3 pt-1 pb-2 space-y-1">
                 {groupConceptStats.length > 0 && (
                   <div className="flex flex-wrap gap-1 items-center">
-                    <span className="text-[9px] tracking-wider text-yellow-700/80 dark:text-yellow-400/70 mr-0.5">概念</span>
+                    <span className="text-[10px] tracking-wider text-yellow-700/80 dark:text-yellow-400/70 mr-0.5">概念</span>
                     {groupConceptStats.slice(0, 20).map(([name, count]) => {
                       const isSelected = selectedTag?.fieldKey === 'concept' && selectedTag?.tag === name
                       return (
@@ -1050,7 +1051,7 @@ function TierGroup({ tier, defaultOpen, extFields, filterKeys, bf, onStockClick,
                 )}
                 {groupIndustryStats.length > 0 && (
                   <div className="flex flex-wrap gap-1 items-center">
-                    <span className="text-[9px] tracking-wider text-blue-700/80 dark:text-blue-400/70 mr-0.5">行业</span>
+                    <span className="text-[10px] tracking-wider text-blue-700/80 dark:text-blue-400/70 mr-0.5">行业</span>
                     {groupIndustryStats.slice(0, 20).map(([name, count]) => {
                       const isSelected = selectedTag?.fieldKey === 'industry' && selectedTag?.tag === name
                       return (
@@ -1532,8 +1533,8 @@ export function LimitUpLadder() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <RefreshCw className="h-5 w-5 animate-spin text-muted" />
+      <div className="p-6">
+        <LoadingSkeleton height={320} rows={9} />
       </div>
     )
   }

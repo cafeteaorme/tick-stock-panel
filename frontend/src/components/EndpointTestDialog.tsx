@@ -187,13 +187,13 @@ function EpRow({ ep, result, testing, isCurrent, isFree, canUsePremium, switchin
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             <span className="text-xs font-medium text-foreground">{ep.label}</span>
             {isPremium && (
-              <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-px rounded-sm bg-warning/15 text-warning font-medium" title={ep.description ?? '需专线加速权限'}>
+              <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-px rounded-sm bg-warning/15 text-warning font-medium" title={ep.description ?? '需专线加速权限'}>
                 <Crown className="h-2.5 w-2.5" />
                 专线
               </span>
             )}
             {isCurrent && (
-              <span className="text-[9px] px-1.5 py-px rounded-sm bg-accent/15 text-accent font-medium">使用中</span>
+              <span className="text-[10px] px-1.5 py-px rounded-sm bg-accent/15 text-accent font-medium">使用中</span>
             )}
           </div>
           {/* 中位延迟 —— 测试中/前/后都占位,避免高度跳动 */}
@@ -230,7 +230,7 @@ function EpRow({ ep, result, testing, isCurrent, isFree, canUsePremium, switchin
         {/* 第3行:URL(左) / min~max·成功率(右) —— 副信息始终占位,行数不变 */}
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[10px] text-muted/50 font-mono truncate min-w-0" title={ep.url}>{ep.url.replace('https://', '')}</span>
-          <span className="ml-auto shrink-0 text-[9px] text-muted/50 font-mono whitespace-nowrap">
+          <span className="ml-auto shrink-0 text-[10px] text-muted/50 font-mono whitespace-nowrap">
             {result && result.ok && result.min_ms != null
               ? `${result.min_ms}~${result.max_ms} · ${result.success}/${result.rounds}`
               : '\u00A0'}

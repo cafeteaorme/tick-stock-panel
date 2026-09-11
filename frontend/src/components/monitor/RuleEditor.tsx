@@ -431,7 +431,7 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
                     {symbolSearch.data.results.map(r => (
                       <button key={r.symbol} onClick={() => addSymbol(r.symbol)} className="block w-full px-2 py-1 text-left text-[11px] hover:bg-elevated cursor-pointer">
                         <span className="font-mono text-foreground/80">{r.symbol}</span>
-                        {(() => { const b = boardTag(r.symbol); return b && <span className={`ml-1 inline-flex items-center justify-center rounded px-0.5 text-[9px] font-bold leading-tight border ${b.color}`}>{b.label}</span> })()}
+                        {(() => { const b = boardTag(r.symbol); return b && <span className={`ml-1 inline-flex items-center justify-center rounded px-0.5 text-[10px] font-bold leading-tight border ${b.color}`}>{b.label}</span> })()}
                         <span className="ml-1 text-muted">{r.name}</span>
                       </button>
                     ))}
@@ -545,7 +545,7 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
                   }`}
                 >
                   <span className="truncate">{category.label}</span>
-                  <span className="font-mono text-[9px] opacity-70">{category.count}</span>
+                  <span className="font-mono text-[10px] opacity-70">{category.count}</span>
                 </button>
               ))}
             </div>
@@ -576,7 +576,7 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
                 >
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className={`shrink-0 rounded border px-1 py-px text-[9px] font-medium ${sourceMeta.className}`}>{sourceMeta.label}</span>
+                      <span className={`shrink-0 rounded border px-1 py-px text-[10px] font-medium ${sourceMeta.className}`}>{sourceMeta.label}</span>
                       <span className="truncate text-xs font-medium text-foreground">{strategy.name}</span>
                     </span>
                     <span className="mt-1 block truncate text-[10px] text-muted" title={summary}>{summary}</span>
@@ -594,7 +594,7 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
           <div className="border-t border-border/60 pt-3">
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="text-[11px] text-muted">通知事件</span>
-              <span className="text-[9px] text-muted">至少选择一项</span>
+              <span className="text-[10px] text-muted">至少选择一项</span>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {(['signal', 'pool'] as const).map(group => (
@@ -647,7 +647,7 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
       <div className="rounded-btn border border-border/40 bg-base/40 p-3 space-y-2">
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-medium text-foreground">Webhook 推送</span>
-          <span className="text-[9px] text-muted">触发时推送告警到外部</span>
+          <span className="text-[10px] text-muted">触发时推送告警到外部</span>
         </div>
 
         {/* 渠道列表 */}
@@ -661,9 +661,9 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
               className="h-3 w-3 accent-accent cursor-pointer"
             />
             <span className="text-[11px] text-foreground">飞书</span>
-            <span className="text-[9px] text-muted">群推送 Webhook</span>
+            <span className="text-[10px] text-muted">群推送 Webhook</span>
             {(draft.webhook_channels ?? []).includes('feishu') && (
-              <span className={`ml-auto text-[9px] ${feishuConfigured ? 'text-emerald-500' : 'text-warning'}`}>
+              <span className={`ml-auto text-[10px] ${feishuConfigured ? 'text-emerald-500' : 'text-warning'}`}>
                 {feishuConfigured ? '已配置' : '未配置'}
               </span>
             )}
@@ -678,9 +678,9 @@ export function RuleEditor({ rule, preset, simple, onClose, onSaved }: Props) {
               className="h-3 w-3 accent-accent cursor-pointer"
             />
             <span className="text-[11px] text-foreground">企业微信</span>
-            <span className="text-[9px] text-muted">群推送 Webhook</span>
+            <span className="text-[10px] text-muted">群推送 Webhook</span>
             {(draft.webhook_channels ?? []).includes('wecom') && (
-              <span className={`ml-auto text-[9px] ${wecomConfigured ? 'text-emerald-500' : 'text-warning'}`}>
+              <span className={`ml-auto text-[10px] ${wecomConfigured ? 'text-emerald-500' : 'text-warning'}`}>
                 {wecomConfigured ? '已配置' : '未配置'}
               </span>
             )}

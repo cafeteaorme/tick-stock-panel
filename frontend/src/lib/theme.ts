@@ -115,6 +115,26 @@ export function chartTheme(theme: Theme): ChartTheme {
   return theme === 'dark' ? DARK : LIGHT
 }
 
+// ================================================================
+// 语义色唯一来源 (与 index.css 的 --bull/--bear 保持一致)。
+// 之前图表组件散落着更暗的 #C74040/#2D9B65, 同屏出现两套红涨绿跌;
+// 所有需要涨跌色的 TS/图表代码统一从这里 import。
+// ================================================================
+
+/** 涨/收红 (A 股语义) */
+export const BULL = '#F04438'
+/** 跌/收绿 (A 股语义) */
+export const BEAR = '#12B76A'
+
+/** hex → rgba 字符串 (图表需要透明度时统一走这里, 避免手写第二套色值) */
+export function withAlpha(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  const r = (n >> 16) & 255
+  const g = (n >> 8) & 255
+  const b = n & 255
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
 /** hook: 当前主题的图表调色板 (主题切换自动触发重渲染)。 */
 export function useChartTheme(): ChartTheme {
   return chartTheme(useTheme())

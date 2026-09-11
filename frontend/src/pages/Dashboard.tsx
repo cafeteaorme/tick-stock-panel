@@ -16,6 +16,8 @@ import { cn } from '@/lib/cn'
 import { cnSignal } from '@/lib/signals'
 import { strategyEventMeta, strategyName } from '@/lib/strategyMonitorEvents'
 import { boardTag } from '@/components/stock-table/primitives'
+import { BULL, BEAR } from '@/lib/theme'
+import { ErrorBanner, LoadingSkeleton } from '@/components/LoadingState'
 
 function n(v: number | null | undefined) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
@@ -23,11 +25,11 @@ function n(v: number | null | undefined) {
 
 function scoreColor(v: number) {
   // A 股惯例: 强势=红, 弱式=绿
-  if (v >= 70) return '#F04438'
+  if (v >= 70) return BULL
   if (v >= 55) return '#FB923C'
   if (v >= 45) return '#F59E0B'
   if (v >= 30) return '#84CC16'
-  return '#12B76A'
+  return BEAR
 }
 
 function fmtPrice(v: number | null | undefined, digits = 2) {
@@ -160,22 +162,22 @@ function MonitorWidget({ onStockClick }: { onStockClick: (event: AlertEvent) => 
                 <>
                   {ev.symbol ? (
                     <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                      <span className={cn('shrink-0 text-[9px] font-medium', eventMeta.className)}>
+                      <span className={cn('shrink-0 text-[10px] font-medium', eventMeta.className)}>
                         {eventMeta.action}
                       </span>
                       {sname
-                        ? <span className="truncate text-[9px] font-medium text-amber-400">「{sname}」</span>
-                        : ev.message && <span className="truncate text-[9px] text-muted">{ev.message}</span>}
+                        ? <span className="truncate text-[10px] font-medium text-amber-400">「{sname}」</span>
+                        : ev.message && <span className="truncate text-[10px] text-muted">{ev.message}</span>}
                       <span className="flex-1" />
-                      <span className="text-[8px] text-muted/50 shrink-0 font-mono">
+                      <span className="text-[10px] text-muted/50 shrink-0 font-mono">
                         {ev.ts ? new Date(ev.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                       </span>
                     </div>
                   ) : (
                     <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-[9px] text-muted">{ev.message}</span>
+                      <span className="truncate text-[10px] text-muted">{ev.message}</span>
                       <span className="flex-1" />
-                      <span className="text-[8px] text-muted/50 shrink-0 font-mono">
+                      <span className="text-[10px] text-muted/50 shrink-0 font-mono">
                         {ev.ts ? new Date(ev.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                       </span>
                     </div>
@@ -183,7 +185,7 @@ function MonitorWidget({ onStockClick }: { onStockClick: (event: AlertEvent) => 
                   {ev.signals && ev.signals.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {ev.signals.map(signal => (
-                        <span key={signal} className="rounded bg-accent/8 px-1 py-px text-[8px] text-accent/80">{cnSignal(signal)}</span>
+                        <span key={signal} className="rounded bg-accent/8 px-1 py-px text-[10px] text-accent/80">{cnSignal(signal)}</span>
                       ))}
                     </div>
                   )}
@@ -191,20 +193,20 @@ function MonitorWidget({ onStockClick }: { onStockClick: (event: AlertEvent) => 
               ) : (
                 <>
                   <div className="mt-0.5 flex items-center gap-1.5">
-                    <span className={cn('shrink-0 rounded px-1 py-px text-[8px] font-medium', _SOURCE_BADGE[ev.source] ?? 'bg-elevated text-muted')}>
+                    <span className={cn('shrink-0 rounded px-1 py-px text-[10px] font-medium', _SOURCE_BADGE[ev.source] ?? 'bg-elevated text-muted')}>
                       {_SOURCE_LABEL[ev.source] ?? ev.source}
                     </span>
                     {ev.message && (
-                      <span className="text-[9px] text-muted truncate flex-1">{ev.message}</span>
+                      <span className="text-[10px] text-muted truncate flex-1">{ev.message}</span>
                     )}
-                    <span className="text-[8px] text-muted/50 shrink-0 font-mono">
+                    <span className="text-[10px] text-muted/50 shrink-0 font-mono">
                       {ev.ts ? new Date(ev.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
                     </span>
                   </div>
                   {ev.signals && ev.signals.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {ev.signals.map((s, j) => (
-                        <span key={j} className="rounded bg-accent/8 px-1 py-px text-[8px] text-accent/80">{cnSignal(s)}</span>
+                        <span key={j} className="rounded bg-accent/8 px-1 py-px text-[10px] text-accent/80">{cnSignal(s)}</span>
                       ))}
                     </div>
                   )}
@@ -278,13 +280,13 @@ function DistributionBars({ rows }: { rows: OverviewMarket['distribution'] }) {
         const positive = i >= 4
         return (
           <div key={r.label} className="flex h-full min-w-0 flex-col items-center justify-end gap-0.5">
-            <div className="font-mono text-[9px] text-muted">{r.count || ''}</div>
+            <div className="font-mono text-[10px] text-muted">{r.count || ''}</div>
             <div
               className={`w-2 rounded-full ${positive ? 'bg-gradient-to-t from-bull/45 to-bull/90' : 'bg-gradient-to-t from-bear/45 to-bear/90'}`}
               style={{ height: `${Math.max(4, r.count / maxCount * 86)}%` }}
               title={`${r.label}: ${r.count}只`}
             />
-            <div className="truncate text-[9px] text-muted">{r.label}</div>
+            <div className="truncate text-[10px] text-muted">{r.label}</div>
           </div>
         )
       })}
@@ -382,7 +384,7 @@ function LadderMini({ limit }: { limit: OverviewMarket['limit'] }) {
             {showStocks && (
               <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 pl-[50px]">
                 {stocks.map(s => (
-                  <span key={s.symbol} className="inline-flex items-center gap-0.5 text-[9px] text-secondary">
+                  <span key={s.symbol} className="inline-flex items-center gap-0.5 text-[10px] text-secondary">
                     {s.name || s.symbol}
                   </span>
                 ))}
@@ -412,7 +414,7 @@ function StockList({ title, rows, mode, onStockClick }: {
     <div className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
       <div className="mb-1 flex items-center justify-between">
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-        <span className="text-[9px] text-muted">TOP {Math.min(rows.length, 8)}</span>
+        <span className="text-[10px] text-muted">TOP {Math.min(rows.length, 8)}</span>
       </div>
       <div className="space-y-1">
         {rows.slice(0, 8).map((r, idx) => (
@@ -428,29 +430,29 @@ function StockList({ title, rows, mode, onStockClick }: {
                 {(() => {
                   const board = boardTag(r.symbol)
                   return board ? (
-                    <span className={`shrink-0 inline-flex items-center justify-center h-3 px-1 rounded text-[8px] font-bold leading-none border ${board.color}`}>
+                    <span className={`shrink-0 inline-flex items-center justify-center h-3 px-1 rounded text-[10px] font-bold leading-none border ${board.color}`}>
                       {board.label}
                     </span>
                   ) : null
                 })()}
               </div>
-              <span className="font-mono text-[9px] text-muted">{r.symbol}</span>
+              <span className="font-mono text-[10px] text-muted">{r.symbol}</span>
             </div>
             <div className="text-right">
               {mode === 'amount' ? (
                 <>
                   <div className="font-mono text-[11px] text-foreground">{fmtBigNum(r.amount)}</div>
-                  <div className={`font-mono text-[9px] ${pctClass(r.change_pct)}`}>{fmtStockPct(r.change_pct)}</div>
+                  <div className={`font-mono text-[10px] ${pctClass(r.change_pct)}`}>{fmtStockPct(r.change_pct)}</div>
                 </>
               ) : mode === 'active' ? (
                 <>
                   <div className="font-mono text-[11px] text-accent">{fmtPrice(r.turnover_rate, 1)}%</div>
-                  <div className={`font-mono text-[9px] ${pctClass(r.change_pct)}`}>{fmtStockPct(r.change_pct)}</div>
+                  <div className={`font-mono text-[10px] ${pctClass(r.change_pct)}`}>{fmtStockPct(r.change_pct)}</div>
                 </>
               ) : (
                 <>
                   <div className={`font-mono text-[11px] font-semibold ${pctClass(r.change_pct)}`}>{fmtStockPct(r.change_pct)}</div>
-                  <div className="font-mono text-[9px] text-muted">{fmtPrice(r.close)}</div>
+                  <div className="font-mono text-[10px] text-muted">{fmtPrice(r.close)}</div>
                 </>
               )}
             </div>
@@ -471,11 +473,11 @@ function RankColumn({ title, rows, tone, onStockClick }: {
       <div className={`text-[10px] font-medium ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>{title}</div>
       {rows.slice(0, 5).map((r, idx) => (
         <div key={`${title}-${r.name}-${idx}`} className="grid grid-cols-[14px_1fr_auto] items-center gap-1 rounded-md bg-elevated/40 px-1.5 py-1 border border-transparent hover:border-border/60 transition-colors">
-          <span className="text-center font-mono text-[9px] text-muted">{idx + 1}</span>
+          <span className="text-center font-mono text-[10px] text-muted">{idx + 1}</span>
           <div className="min-w-0">
             <div className="truncate text-[11px] text-foreground" title={r.name}>{r.name}</div>
             <div className="mt-0.5 flex items-center gap-1">
-              <span className="shrink-0 font-mono text-[9px] text-muted">{r.count}只</span>
+              <span className="shrink-0 font-mono text-[10px] text-muted">{r.count}只</span>
               <span className="text-muted">·</span>
               {r.leader?.symbol ? (
                 <button
@@ -489,7 +491,7 @@ function RankColumn({ title, rows, tone, onStockClick }: {
               {r.leader?.symbol && (() => {
                 const board = boardTag(r.leader!.symbol!)
                 return board ? (
-                  <span className={`shrink-0 inline-flex items-center justify-center h-3 px-1 rounded text-[8px] font-bold leading-none border ${board.color}`}>
+                  <span className={`shrink-0 inline-flex items-center justify-center h-3 px-1 rounded text-[10px] font-bold leading-none border ${board.color}`}>
                     {board.label}
                   </span>
                 ) : null
@@ -625,21 +627,16 @@ export function Dashboard() {
 
   if (overview.isLoading && !data) {
     return (
-      <div className="flex h-full items-center justify-center bg-base">
-        <div className="flex items-center gap-2 text-sm text-muted">
-          <Loader2 className="h-4 w-4 animate-spin" /> 加载市场看板…
-        </div>
+      <div className="p-6 bg-base">
+        <LoadingSkeleton height={360} rows={10} />
       </div>
     )
   }
 
   if (!data) {
     return (
-      <div className="flex h-full items-center justify-center bg-base p-6">
-        <div className="rounded-card border border-border bg-surface p-6 text-center">
-          <div className="text-sm text-danger">看板加载失败</div>
-          <button onClick={() => overview.refetch()} className="mt-3 rounded-btn bg-accent px-3 py-1.5 text-xs font-medium text-base">重试</button>
-        </div>
+      <div className="p-6 bg-base">
+        <ErrorBanner message="看板加载失败" onRetry={() => overview.refetch()} />
       </div>
     )
   }
@@ -815,7 +812,7 @@ export function Dashboard() {
 
         <aside className="min-w-0 space-y-1.5">
           <section className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">
-            <SectionTitle icon={Flame} title="涨停梯队" hint={<span className="inline-flex items-center gap-1">{`涨停 ${data.limit.limit_up}`}{isSealedDegrade && <span className="text-[9px] px-1 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">{hasDepth ? '未修正' : '降级'}</span>}</span>} />
+            <SectionTitle icon={Flame} title="涨停梯队" hint={<span className="inline-flex items-center gap-1">{`涨停 ${data.limit.limit_up}`}{isSealedDegrade && <span className="text-[10px] px-1 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-500">{hasDepth ? '未修正' : '降级'}</span>}</span>} />
             <LadderMini limit={data.limit} />
           </section>
           <section className="rounded-card border border-border bg-surface/80 p-1.5 shadow-[0_1px_2px_hsl(var(--border)/0.4)] backdrop-blur-sm transition-shadow hover:shadow-[0_2px_8px_hsl(var(--border)/0.5)]">

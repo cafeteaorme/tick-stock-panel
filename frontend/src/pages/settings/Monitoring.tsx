@@ -121,7 +121,7 @@ export function SettingsMonitoringPanel({ highlight }: { highlight?: string } = 
     try {
       await api.updateRealtimeMonitorConfig(cfg)
       qc.invalidateQueries({ queryKey: QK.preferences })
-    } catch (e) {
+    } catch {
       // 忽略 — Toast 已在 request 层处理
     }
   }, [qc])
@@ -548,11 +548,11 @@ export function SettingsMonitoringPanel({ highlight }: { highlight?: string } = 
                   className="h-3 w-3 accent-accent cursor-pointer"
                 />
                 <span className="text-[11px] font-medium text-foreground">飞书</span>
-                <span className="text-[9px] text-muted">群推送 Webhook</span>
+                <span className="text-[10px] text-muted">群推送 Webhook</span>
                 {webhookDefaultChannels.includes('feishu') && (
-                  <span className="rounded bg-accent/15 px-1 py-px text-[9px] text-accent">默认</span>
+                  <span className="rounded bg-accent/15 px-1 py-px text-[10px] text-accent">默认</span>
                 )}
-                <span className={`ml-auto text-[9px] ${feishuWebhookUrl ? 'text-emerald-500' : 'text-warning'}`}>
+                <span className={`ml-auto text-[10px] ${feishuWebhookUrl ? 'text-emerald-500' : 'text-warning'}`}>
                   {feishuWebhookUrl ? '已配置' : '未配置'}
                 </span>
                 <ChevronDown className={`h-3 w-3 text-muted transition-transform ${channelOpen ? 'rotate-180' : ''}`} />
@@ -634,11 +634,11 @@ export function SettingsMonitoringPanel({ highlight }: { highlight?: string } = 
                   className="h-3 w-3 accent-accent cursor-pointer"
                 />
                 <span className="text-[11px] font-medium text-foreground">企业微信</span>
-                <span className="text-[9px] text-muted">群推送 Webhook</span>
+                <span className="text-[10px] text-muted">群推送 Webhook</span>
                 {webhookDefaultChannels.includes('wecom') && (
-                  <span className="rounded bg-accent/15 px-1 py-px text-[9px] text-accent">默认</span>
+                  <span className="rounded bg-accent/15 px-1 py-px text-[10px] text-accent">默认</span>
                 )}
-                <span className={`ml-auto text-[9px] ${wecomWebhookUrl ? 'text-emerald-500' : 'text-warning'}`}>
+                <span className={`ml-auto text-[10px] ${wecomWebhookUrl ? 'text-emerald-500' : 'text-warning'}`}>
                   {wecomWebhookUrl ? '已配置' : '未配置'}
                 </span>
                 <ChevronDown className={`h-3 w-3 text-muted transition-transform ${wecomOpen ? 'rotate-180' : ''}`} />
@@ -709,8 +709,8 @@ export function SettingsMonitoringPanel({ highlight }: { highlight?: string } = 
                   className="h-3 w-3 accent-accent cursor-pointer disabled:opacity-40"
                 />
                 <span className="text-[11px] font-medium text-foreground">企业微信</span>
-                <span className="text-[9px] text-muted">智能机器人</span>
-                <span className={`ml-auto text-[9px] ${wecomBotId ? (botStatus?.connected ? 'text-emerald-500' : 'text-warning') : 'text-muted'}`}>
+                <span className="text-[10px] text-muted">智能机器人</span>
+                <span className={`ml-auto text-[10px] ${wecomBotId ? (botStatus?.connected ? 'text-emerald-500' : 'text-warning') : 'text-muted'}`}>
                   {wecomBotId ? (botStatus?.connected ? '已连接' : (wecomBotEnabled ? '连接中' : '已配置')) : '未配置'}
                 </span>
                 <ChevronDown className={`h-3 w-3 text-muted transition-transform ${botOpen ? 'rotate-180' : ''}`} />

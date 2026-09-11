@@ -169,7 +169,7 @@ function BubbleItem({ task, isLast, onPointerDown }: {
         <span className="flex-1 min-w-0 text-[11px] font-medium text-foreground leading-none truncate">
           {task.name || task.symbol}
         </span>
-        <span className="shrink-0 text-[9px] leading-none">
+        <span className="shrink-0 text-[10px] leading-none">
           {isWorking ? <span className="text-sky-300/80">个股分析</span>
             : isError ? <span className="text-red-300/80">失败</span>
             : <span className="text-emerald-300/80">点击查看</span>}

@@ -269,8 +269,8 @@ export function DataSourceEditor({
                     <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${enabled ? 'bg-accent' : 'bg-muted/30'}`} />
                     <span className="flex-1 text-left">{DATASET_LABEL[key]}</span>
                     {enabled
-                      ? <span className="text-[9px] text-accent">已配置</span>
-                      : <span className="text-[9px] text-muted/50">回退 TF</span>
+                      ? <span className="text-[10px] text-accent">已配置</span>
+                      : <span className="text-[10px] text-muted/50">回退 TF</span>
                     }
                     <Toggle
                       checked={enabled}
@@ -707,7 +707,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-[10px] uppercase tracking-widest text-muted">{label}</span>
-        {hint && <span className="text-[9px] text-muted/50 normal-case">{hint}</span>}
+        {hint && <span className="text-[10px] text-muted/50 normal-case">{hint}</span>}
       </div>
       {children}
     </div>

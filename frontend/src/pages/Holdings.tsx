@@ -7,6 +7,7 @@ import {
 import { api, type HoldingRow, type HoldingsSummary } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
 import { toast } from '@/components/Toast'
+import { Modal } from '@/components/Modal'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { RecentPhotoStrip, type PickedImage } from '@/components/imports/RecentPhotoStrip'
 
@@ -555,7 +556,7 @@ function ShotSummaryBlock({
       <div className="grid grid-cols-4 gap-x-3 gap-y-1.5">
         {fields.map(([label, v, colored]) => (
           <div key={label} className="min-w-0">
-            <div className="text-[9px] text-muted truncate">{label}</div>
+            <div className="text-[10px] text-muted truncate">{label}</div>
             <div className={`text-[11px] tabular-nums font-medium truncate ${colored ? pnlColor(v) : 'text-foreground'}`}>
               {label.includes('%') ? (v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '—') : fmtMoney(v)}
             </div>
@@ -831,9 +832,11 @@ function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onCo
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative rounded-card border border-border bg-surface shadow-2xl w-[28rem] max-w-[94vw] max-h-[88vh] flex flex-col">
+    <Modal
+      onClose={onClose}
+      ariaLabel="连接投资账本"
+      panelClassName="w-[28rem] max-w-[94vw] max-h-[88vh] flex flex-col rounded-card border border-border bg-surface shadow-2xl"
+    >
         <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
           <div className="text-sm font-semibold text-foreground">连接投资账本</div>
           <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
@@ -888,10 +891,11 @@ function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onCo
             保存 Cookie
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
-}function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
+}
+
+function HoldingsImportDialog({ onClose, initialImages }: { onClose: () => void; initialImages?: PickedImage[] }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [queue, setQueue] = useState<PickedImage[]>([])
@@ -938,7 +942,7 @@ function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onCo
     if (autoStarted.current || !initialImages?.length) return
     autoStarted.current = true
     setQueue(initialImages)
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+     
     void recognizeAll(initialImages)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1346,15 +1350,15 @@ type TzzbJob = { key: string; label?: string; status: string; ok?: boolean | nul
 
 function BgTasksPanel({ jobs, onClose }: { jobs: TzzbJob[]; onClose: () => void }) {
   const qc = useQueryClient()
-  const tasks = useQuery({ queryKey: ['holdings-bg-tasks'], queryFn: api.holdingsBgTasks, refetchInterval: 30_000 })
-  const trades = useQuery({ queryKey: ['holdings-tzzb-trades'], queryFn: api.holdingsTzzbTrades })
+  const tasks = useQuery({ queryKey: QK.holdingsBgTasks, queryFn: api.holdingsBgTasks, refetchInterval: 30_000 })
+  const trades = useQuery({ queryKey: QK.holdingsTzzbTrades, queryFn: api.holdingsTzzbTrades })
   // 任务状态轮询提升到页面级 (Holdings 组件), 面板关闭时也能感知任务完成
   const jobOf = (k: string) => jobs.find(j => j.key === k)
   const running = (k: string) => jobOf(k)?.status === 'running'
   const start = (key: 'trades' | 'history', fn: () => Promise<unknown>) => {
     if (running(key)) return
     Promise.resolve(fn()).catch(() => toast('任务启动失败', 'error'))
-    qc.invalidateQueries({ queryKey: ['holdings-tzzb-jobs'] })
+    qc.invalidateQueries({ queryKey: QK.holdingsTzzbJobs })
   }
   const JobRow = ({ k, btn }: { k: 'trades' | 'history'; btn: string }) => {
     const j = jobOf(k)
@@ -1618,7 +1622,7 @@ export function Holdings() {
   })
   // 清仓核对 (账本成交派生 vs 本地已清仓)
   const clearedCheck = useQuery({
-    queryKey: ['holdings-tzzb-cleared-check', activeAcc],
+    queryKey: QK.holdingsTzzbClearedCheck(activeAcc),
     queryFn: () => api.holdingsTzzbClearedCheck(activeAcc || undefined),
   })
   const [showTasks, setShowTasks] = useState(false)
@@ -1745,7 +1749,7 @@ export function Holdings() {
       case 'name': return (
         <td className="px-3 py-2.5">
           <div className="flex items-center gap-1.5">
-            {(REGION_BADGE[r.region ?? 'CN']) && <span className={`px-1 py-px rounded text-[9px] font-bold border ${REGION_BADGE[r.region ?? 'CN'].cls}`}>{REGION_BADGE[r.region ?? 'CN'].label}</span>}
+            {(REGION_BADGE[r.region ?? 'CN']) && <span className={`px-1 py-px rounded text-[10px] font-bold border ${REGION_BADGE[r.region ?? 'CN'].cls}`}>{REGION_BADGE[r.region ?? 'CN'].label}</span>}
             <span className="text-foreground font-medium">{r.name || '—'}</span>
             <span className="font-mono text-muted text-xs">{r.symbol}</span>
           </div>
@@ -1776,7 +1780,7 @@ export function Holdings() {
   const [tzzbSyncing, setTzzbSyncing] = useState(false)
   const [showCookieDialog, setShowCookieDialog] = useState(false)
   const tzzbStatus = useQuery({
-    queryKey: ['holdings-tzzb-status'],
+    queryKey: QK.holdingsTzzbStatus,
     queryFn: api.holdingsTzzbStatus,
     refetchInterval: 60_000,
   })
@@ -1785,7 +1789,7 @@ export function Holdings() {
   // 运行中 1.5s, 空闲 8s; 运行→完成沿触发业务数据全量刷新与提示
   const prevJobStatus = useRef<Record<string, string>>({})
   const jobsQ = useQuery({
-    queryKey: ['holdings-tzzb-jobs'],
+    queryKey: QK.holdingsTzzbJobs,
     queryFn: api.holdingsTzzbJobs,
     refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) => {
       const jobs = q.state.data?.jobs ?? []
@@ -1796,7 +1800,7 @@ export function Holdings() {
           // 同步成功后链式更新真实成交缓存 (B/S 点 + 清仓核对数据源), 沿用原同步成功行为
           if (j.key === 'sync' && j.ok) {
             api.holdingsTzzbTradesRefresh()
-              .then(() => qc.invalidateQueries({ queryKey: ['holdings-tzzb-cleared-check'] }))
+              .then(() => qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() }))
               .catch(() => {})
           }
           if (j.ok) toast(`${j.label || j.key}完成：${j.message || ''}`, 'success')
@@ -1812,8 +1816,8 @@ export function Holdings() {
     setTzzbSyncing(true)
     try {
       const res = await api.holdingsTzzbSync(activeAcc || undefined)
-      qc.invalidateQueries({ queryKey: ['holdings-tzzb-jobs'] })
-      qc.invalidateQueries({ queryKey: ['holdings-tzzb-status'] })
+      qc.invalidateQueries({ queryKey: QK.holdingsTzzbJobs })
+      qc.invalidateQueries({ queryKey: QK.holdingsTzzbStatus })
       // 同步已后台任务化: 数据刷新与成败提示由任务轮询的 running→done 沿触发
       if (res.started) {
         toast(`${isRefresh ? '刷新' : '导入'}已在后台开始，完成后自动提示`, 'success')
@@ -1898,7 +1902,7 @@ export function Holdings() {
                 {(a.tzzb_count ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 ml-0.5 align-middle" />}
                 {(a.day_pnl != null) ? (
                   <span className={`ml-1 tabular-nums ${pnlColor(a.day_pnl)}`}>
-                    {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[9px]"> {fmtPct(a.day_pnl_pct)}</span>}
+                    {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[10px]"> {fmtPct(a.day_pnl_pct)}</span>}
                   </span>
                 ) : ((a.positions ?? 0) > 0 && <span className="ml-1 text-muted" title="行情加载中…">…</span>)}
               </button>
@@ -2158,7 +2162,7 @@ export function Holdings() {
                           <div className="flex items-center gap-1.5">
                             {(() => {
                               const b = REGION_BADGE[r.region ?? (r.symbol.endsWith('.HK') ? 'HK' : r.symbol.endsWith('.US') ? 'US' : 'CN')]
-                              return b ? <span className={`px-1 py-px rounded text-[9px] font-bold border ${b.cls}`}>{b.label}</span> : null
+                              return b ? <span className={`px-1 py-px rounded text-[10px] font-bold border ${b.cls}`}>{b.label}</span> : null
                             })()}
                             <span className="text-foreground font-medium">{r.name || '—'}</span>
                             <span className="font-mono text-muted text-xs">{r.symbol}</span>

@@ -17,7 +17,7 @@ export function HeldBadge({ symbol }: { symbol: string }) {
   return (
     <span
       title="我的持仓"
-      className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
+      className="shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
     >
       持
     </span>

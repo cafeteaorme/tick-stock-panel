@@ -86,7 +86,7 @@ export function RecentPhotoStrip({
             title={`${p.date} ${p.name}`}
           >
             <img src={p.url} alt={p.name} className="w-full h-full object-cover" loading="lazy" />
-            <span className={`absolute bottom-0 inset-x-0 bg-black/55 text-white text-center leading-3.5 ${layout === 'grid' ? 'text-[10px] py-0.5' : 'text-[8px]'}`}>
+            <span className={`absolute bottom-0 inset-x-0 bg-black/55 text-white text-center leading-3.5 ${layout === 'grid' ? 'text-[10px] py-0.5' : 'text-[10px]'}`}>
               {p.date.slice(5)}
             </span>
             {picking === p.url && (

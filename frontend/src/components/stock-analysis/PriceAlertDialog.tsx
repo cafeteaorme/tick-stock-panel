@@ -272,7 +272,7 @@ export function PriceAlertDialog({ symbol, name, onClose }: Props) {
                           <button key={`${level.type}-${level.value}`} onClick={() => selectLevel(level)} className={`flex h-10 w-full items-center gap-2 px-1.5 text-left transition-colors hover:bg-elevated/60 ${selected ? 'bg-sky-400/[0.08]' : ''}`}>
                             <span className="min-w-0 flex-1">
                               <span className={`block truncate text-[11px] ${selected ? 'text-sky-300' : 'text-foreground'}`}>{level.label}</span>
-                              <span className="block truncate text-[9px] text-muted">{levelGroupLabel(level)}</span>
+                              <span className="block truncate text-[10px] text-muted">{levelGroupLabel(level)}</span>
                             </span>
                             <span className="shrink-0 font-mono text-xs text-secondary">{level.value.toFixed(2)}</span>
                             <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${selected ? 'border-sky-400 bg-sky-400 text-white' : 'border-border text-transparent'}`}>
@@ -313,7 +313,7 @@ export function PriceAlertDialog({ symbol, name, onClose }: Props) {
                   <label key={channel.key} className={`inline-flex items-center gap-2 text-xs ${channel.configured ? 'text-foreground' : 'text-muted/60'}`}>
                     <input type="checkbox" checked={channels.includes(channel.key)} disabled={!channel.configured} onChange={() => toggleChannel(channel.key)} className="h-3.5 w-3.5 accent-sky-500" />
                     {channel.label}
-                    {!channel.configured && <span className="text-[9px]">未配置</span>}
+                    {!channel.configured && <span className="text-[10px]">未配置</span>}
                   </label>
                 ))}
               </div>

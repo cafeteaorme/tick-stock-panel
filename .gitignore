@@ -69,6 +69,8 @@ backend/user_prompts/
 
 # ===== TypeScript build cache =====
 frontend/tsconfig*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # ===== Data files =====
 *.xlsx

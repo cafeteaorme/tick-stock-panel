@@ -44,7 +44,7 @@ export function StrategyOptimizer() {
   // 刷新/切页后: 恢复未完成的优化任务
   useEffect(() => {
     tryReconnectOptimize()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   const canRun = sweep.strategyId && sweep.combos > 0 && sweep.combos <= GRID_MAX_COMBINATIONS

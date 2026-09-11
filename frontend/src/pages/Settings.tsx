@@ -74,7 +74,7 @@ export function Settings() {
                   <Icon className="h-3.5 w-3.5 shrink-0" />
                   <span>{label}</span>
                   {badge && (
-                    <span className="ml-auto inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400 shrink-0">
+                    <span className="ml-auto inline-flex items-center rounded-full border border-amber-400/30 bg-amber-400/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-400 shrink-0">
                       {badge}
                     </span>
                   )}

@@ -654,7 +654,7 @@ export function CreateExtDialog({ onClose }: { onClose: () => void }) {
                   <span className="flex-1 text-[11px] font-mono text-muted">symbol</span>
                   <span className="w-[52px] text-center text-[10px] text-muted/40">文本</span>
                   {matchStatus !== 'none'
-                    ? <span className="text-[9px] text-green-500/70 shrink-0">
+                    ? <span className="text-[10px] text-green-500/70 shrink-0">
                         {symbolMap.type === 'mapped' ? `← ${symbolMap.col}` : '← 计算'}
                       </span>
                     : <AlertCircle className="h-3.5 w-3.5 text-danger/60 shrink-0" />}
@@ -664,7 +664,7 @@ export function CreateExtDialog({ onClose }: { onClose: () => void }) {
                   <span className="flex-1 text-[11px] font-mono text-muted">code</span>
                   <span className="w-[52px] text-center text-[10px] text-muted/40">文本</span>
                   {matchStatus !== 'none'
-                    ? <span className="text-[9px] text-green-500/70 shrink-0">
+                    ? <span className="text-[10px] text-green-500/70 shrink-0">
                         {codeMap.type === 'mapped' ? `← ${codeMap.col}` : codeMap.method === 'strip_exchange' ? '← symbol截取' : '← 推算'}
                       </span>
                     : <AlertCircle className="h-3.5 w-3.5 text-danger/60 shrink-0" />}

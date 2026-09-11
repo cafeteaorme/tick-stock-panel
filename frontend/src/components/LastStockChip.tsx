@@ -24,7 +24,7 @@ export function LastStockChip({
         <span className="text-[11px] font-medium text-secondary group-hover:text-foreground transition-colors max-w-[7em] truncate">
           {stock.name}
         </span>
-        <span className="text-[9px] font-mono text-muted">{stock.symbol}</span>
+        <span className="text-[10px] font-mono text-muted">{stock.symbol}</span>
       </span>
     </button>
   )

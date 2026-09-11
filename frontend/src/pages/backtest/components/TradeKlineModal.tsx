@@ -1,3 +1,4 @@
+import { BULL, BEAR } from '@/lib/theme'
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Clock, X } from 'lucide-react'
@@ -74,14 +75,14 @@ export function TradeKlineModal({ trade, onClose }: Props) {
       {
         value: Number(trade.entry_price),
         label: `买入价 ${fmtPrice(trade.entry_price)}`,
-        color: '#C74040',
+        color: BULL,
         start,
         end,
       },
       {
         value: Number(trade.exit_price),
         label: `卖出价 ${fmtPrice(trade.exit_price)}`,
-        color: '#2D9B65',
+        color: BEAR,
         start,
         end,
       },

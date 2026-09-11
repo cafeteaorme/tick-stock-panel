@@ -208,7 +208,7 @@ export function StrategyPoolDialog({ pool, onConfirm, onClose }: Props) {
                         }`}
                       >
                         {tab.label}
-                        <span className="ml-1 text-[9px] opacity-60">{count}</span>
+                        <span className="ml-1 text-[10px] opacity-60">{count}</span>
                       </button>
                     )
                   })}
@@ -231,7 +231,7 @@ export function StrategyPoolDialog({ pool, onConfirm, onClose }: Props) {
                         </span>
                         <span className="text-[10px] text-muted truncate block">{s.description}</span>
                       </span>
-                      <span className={`text-[8px] px-1 py-px rounded border leading-tight shrink-0 ${SOURCE_CLS[s.source] ?? SOURCE_CLS.builtin}`}>
+                      <span className={`text-[10px] px-1 py-px rounded border leading-tight shrink-0 ${SOURCE_CLS[s.source] ?? SOURCE_CLS.builtin}`}>
                         {SOURCE_LABEL[s.source] ?? '内置'}
                       </span>
                       <Plus className="h-3.5 w-3.5 text-muted/40 group-hover:text-accent shrink-0" />
@@ -275,7 +275,7 @@ export function StrategyPoolDialog({ pool, onConfirm, onClose }: Props) {
                             <span className="flex-1 min-w-0 text-[12px] text-foreground truncate">
                               {s?.name ?? id} <span className="text-[10px] text-muted font-mono">{id}</span>
                             </span>
-                            <span className={`text-[8px] px-1 py-px rounded border leading-tight shrink-0 ${SOURCE_CLS[src] ?? SOURCE_CLS.builtin}`}>
+                            <span className={`text-[10px] px-1 py-px rounded border leading-tight shrink-0 ${SOURCE_CLS[src] ?? SOURCE_CLS.builtin}`}>
                               {SOURCE_LABEL[src] ?? '内置'}
                             </span>
                             <button

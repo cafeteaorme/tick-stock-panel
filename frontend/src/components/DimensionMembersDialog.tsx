@@ -265,7 +265,7 @@ function DimensionMembersDialogContent({ target, onClose, onStockClick }: Omit<P
                       style={{ transform: `translateY(${virtualRow.start}px)` }}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        {board && <span className={`inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border text-[9px] font-bold ${board.color}`}>{board.label}</span>}
+                        {board && <span className={`inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border text-[10px] font-bold ${board.color}`}>{board.label}</span>}
                         <span className="min-w-0">
                           <span className="block truncate font-medium text-foreground">{row.name || row.symbol}</span>
                           <span className="block font-mono text-[10px] text-muted">{row.symbol}</span>

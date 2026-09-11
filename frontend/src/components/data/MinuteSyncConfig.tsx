@@ -217,7 +217,7 @@ export function MinuteSyncConfig({ caps, onJobStart }: { caps: { label: string; 
           {fetchingMode === '1y' ? (
             <><Loader2 className="h-3.5 w-3.5 animate-spin" /><span>分段获取中…</span></>
           ) : (
-            <><Calendar className="h-3.5 w-3.5" /><span>获取最近 1 年</span><span className="text-[9px] opacity-70">分段拉取</span></>
+            <><Calendar className="h-3.5 w-3.5" /><span>获取最近 1 年</span><span className="text-[10px] opacity-70">分段拉取</span></>
           )}
         </button>
         </div>

@@ -7,6 +7,34 @@
 - 上游升级到 0.1.89 后**序号不重置**，继续 `0.1.89-0.03`；
 - 序号即「我对项目做过的修订次数」，与上游版本无关，方便追溯每次更新内容。
 
+## 0.1.88-0.47 (2026-09-12)
+
+### 底层优化与 bug 修复 (后端)
+
+- **pyproject.toml**: 合并重复定义的 `[project].dependencies` 键 (TOML 规范不允许, `pycryptodome` 被遮蔽在无效首组); 补录 tzzb CDP 实际依赖的 `websocket-client` (此前靠手工安装不在锁内, `uv sync` 会将其清除导致 CDP 崩)
+- **删除必然 500 的死接口**: `GET /api/holdings/tzzb/debug`、`POST /api/holdings/tzzb/autocookie` 调用了不存在的函数 (前端已无调用方, 同步删 `api.holdingsTzzbAutoCookie`)
+- **tzzb 线程安全**: `_JOBS`/`_CONFIG` 加锁, 同步线程与 API 并发写不再互相覆盖; `_atomic_write_json` 用 pid+tid 唯一 tmp 防并发互踩
+- **路径校验**: recent-photos 文件接口 `startswith` 前缀判断改为 resolve+`is_relative_to` 严格后代判断, 封堵同级目录名绕过与绝对路径替换
+- **启动收敛**: 删重复的 `start_hk_price_refresh` 调用; shutdown 补 tzzb/hk_us_intraday 后台线程停止; 删除零引用的 `background_tasks.py` 与 tzzb 内三个无调用方的 CDP 捕获函数
+- **tzzb/sync 后台任务化**: 同步涉及 CDP+多账户多请求可达数十秒, 不再阻塞 HTTP 请求线程; 复用任务框架 (进度/成功/失败)
+- **关键路径静默 except 加日志**: 复权因子读取失败 (影响复权价)、AI 视觉状态检查失败 (误报未配)、ETF 集合读取失败 (错分类)
+- **修正 2 个过时 OCR 测试**: 断言更新为双引擎契约与 symbol 匹配契约, 并打桩 AI 视觉使测试不依赖本机配置
+
+### 新增测试
+
+- `tests/test_tzzb_logic.py` 15 例: 市场映射 / 清仓轮次金额推导 / 数值清洗 (账本资金安全核心纯逻辑首次有测试覆盖)
+
+### 前端 UI 与工程化
+
+- **红涨绿跌统一**: `lib/theme.ts` 新增 `BULL/BEAR/withAlpha` 语义色唯一来源 (与 CSS token 同值), 替换 ECharts 双 K 线/分时、迷你图、信息条、交易回放等图表里散落的第二套暗色 `#C74040/#2D9B65` (同屏两套红的根因)
+- **排版底线**: 全仓 32 处 `text-[8px]/[9px]` 微字提升到 `text-[10px]`
+- **弹窗统一**: 连接投资账本对话框从自绘浮层迁移到通用 Modal (获得焦点陷阱/ESC/焦点还原)
+- **加载/错误态统一**: 看板/自选/连板梯队/个股分析四个高频页改用共享 `LoadingSkeleton/ErrorBanner` (带重试), 替换各自的临时文案
+- **图表层清理**: 删除 0 引用的 `CandlestickChart.tsx` 与 `lightweight-charts` 依赖及其 Vite 拆包配置
+- **API 客户端收口**: 6 个 AI 流式端点各自复制的 fetch+错误解析+NDJSON 解析收敛为 `ndjsonStream()` 统一入口 (错误处理与 request() 一致)
+- **ESLint 落地**: 新增 flat config, `pnpm lint` 从"无配置空转"变为可用 (0 错误); 顺带修复 lint 抓到的真 bug——MiniIntraday 的 `useId` 在提前 return 之后条件调用
+- **小项**: theme-color 从紫色对齐 accent 蓝; 隐藏标签页停止 15s 轮询 (省电); 仓库内编译产物 (vite.config.js/.d.ts) 移出并进 gitignore; 高频 query key 收进 QK 常量
+
 ## 0.1.88-0.46 (2026-09-11)
 
 ### 修复: 分时图「无法加载」

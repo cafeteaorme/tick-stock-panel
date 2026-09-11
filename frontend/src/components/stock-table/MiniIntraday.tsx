@@ -1,3 +1,4 @@
+import { BULL, BEAR } from '@/lib/theme'
 /** 迷你分时折线图（自选列表共享）。
 
 用当日分钟K的 close 画一条折线 + 昨收水平基准线 + 分时均线。
@@ -20,13 +21,15 @@ export function MiniIntraday({ rows, prevClose, changePct, width = 100, height =
   width?: number
   height?: number
 }) {
+  // 渐变 id 唯一化(自选列表同屏多张图, 避免互相覆盖)。
+  // 注意: Hook 必须在下方提前 return 之前调用 (条件调用会因行数变化导致 Hook 数量不一致而崩溃)
+  const gradId = useId().replace(/:/g, '')
+
   // 空数据：返回等尺寸占位
   if (!rows || rows.length < 2) {
     return <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block" aria-label="暂无分时" />
   }
 
-  const BULL = '#C74040'
-  const BEAR = '#2D9B65'
   const LINE_PREV_CLOSE = '#7A7A85'   // 昨收基准线: 深灰实线
   const LINE_AVG = '#E0B84A'          // 均线: 暖黄
 
@@ -88,9 +91,6 @@ export function MiniIntraday({ rows, prevClose, changePct, width = 100, height =
 
   // 昨收参考线 y 坐标
   const prevCloseY = yScale(baseline)
-
-  // 渐变 id 唯一化(自选列表同屏多张图, 避免互相覆盖)
-  const gradId = useId().replace(/:/g, '')
 
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block">

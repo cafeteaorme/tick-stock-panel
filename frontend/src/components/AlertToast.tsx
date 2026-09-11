@@ -162,7 +162,7 @@ export function AlertToastContainer() {
 
               {/* 顶行: 分类标签 + 代码/名称 + 涨跌幅 + 关闭 */}
               <div className="flex items-center gap-2">
-                <span className={cn('shrink-0 rounded px-1 py-px text-[9px] font-medium', badge.cls)}>
+                <span className={cn('shrink-0 rounded px-1 py-px text-[10px] font-medium', badge.cls)}>
                   {badge.label}
                 </span>
                 {ev.symbol && <span className="font-mono text-xs font-medium text-foreground shrink-0">{ev.symbol}</span>}
@@ -202,7 +202,7 @@ export function AlertToastContainer() {
                   {ev.signals && ev.signals.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1 pl-0.5">
                       {ev.signals.map(signal => (
-                        <span key={signal} className="rounded bg-accent/8 px-1 py-px text-[9px] text-accent/80">{cnSignal(signal)}</span>
+                        <span key={signal} className="rounded bg-accent/8 px-1 py-px text-[10px] text-accent/80">{cnSignal(signal)}</span>
                       ))}
                     </div>
                   )}
@@ -236,7 +236,7 @@ export function AlertToastContainer() {
                 return (
                   <div className="mt-1 flex flex-wrap items-center gap-1 pl-0.5">
                     {tags.map((t, i) => (
-                      <span key={i} className={cn('rounded px-1 py-px text-[9px] leading-tight', t.cls)}>{t.text}</span>
+                      <span key={i} className={cn('rounded px-1 py-px text-[10px] leading-tight', t.cls)}>{t.text}</span>
                     ))}
                   </div>
                 )

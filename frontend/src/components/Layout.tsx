@@ -124,7 +124,7 @@ function MonitorBadge({ active }: { active: boolean }) {
   })()
   if (active || unread <= 0 || !badgeEnabled) return null
   return (
-    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[9px] font-bold text-white animate-pulse">
+    <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white animate-pulse">
       {unread > 99 ? '99+' : unread}
     </span>
   )
@@ -364,12 +364,11 @@ export function Layout() {
     : (dataSources?.custom?.find(s => s.name === activeProvider)?.datasets || [])
   const isCustomActive = activeProvider !== 'tickflow'
 
-  // 轮询触发记录总数 → 更新监控中心徽标 (每 15 秒)
+  // 轮询触发记录总数 → 更新监控中心徽标 (每 15 秒; 标签页隐藏时暂停, 省电省请求)
   const alertsTotalQuery = useQuery({
-    queryKey: ['alerts-total'],
+    queryKey: QK.alertsTotal,
     queryFn: () => api.alertsList({ days: 7, limit: 1 }),
     refetchInterval: 15000,
-    refetchIntervalInBackground: true,
     select: (data) => data.total,
   })
   // 只在拿到真实总数时同步徽标 (避免 data=undefined 时传 0 重置 lastSeen)
@@ -510,7 +509,7 @@ export function Layout() {
                 {activeProviderName}
               </span>
               {isCustomActive && (
-                <span className="shrink-0 rounded bg-accent/15 px-1 py-px text-[8px] font-semibold uppercase tracking-wider text-accent">
+                <span className="shrink-0 rounded bg-accent/15 px-1 py-px text-[10px] font-semibold uppercase tracking-wider text-accent">
                   自定义
                 </span>
               )}

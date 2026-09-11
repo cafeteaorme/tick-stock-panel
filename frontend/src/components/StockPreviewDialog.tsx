@@ -141,7 +141,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                 {(() => {
                   const board = symbol ? boardTag(symbol) : null
                   return board ? (
-                    <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[9px] font-bold leading-none border ${board.color}`}>
+                    <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded text-[10px] font-bold leading-none border ${board.color}`}>
                       {board.label}
                     </span>
                   ) : null
@@ -151,7 +151,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                 {holding && (
                   <span
                     title={`我的持仓 ${holding.qty} 股${holding.avg_cost ? ` · 成本 ${holding.avg_cost}` : ''} · 前往「持仓」页可编辑/卖出`}
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold leading-none border border-violet-500/30 bg-violet-500/12 text-violet-400"
                   >
                     持{holding.qty >= 10000 ? `${(holding.qty / 10000).toFixed(1)}万` : Math.round(holding.qty)}
                   </span>
@@ -283,7 +283,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                   {triggerInfo.signals && triggerInfo.signals.length > 0 && (
                     <div className="flex items-center gap-1 flex-wrap">
                       {triggerInfo.signals.map((s, j) => (
-                        <span key={j} className="rounded bg-accent/10 px-1.5 py-0.5 text-[9px] text-accent/80">{cnSignal(s)}</span>
+                        <span key={j} className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent/80">{cnSignal(s)}</span>
                       ))}
                     </div>
                   )}

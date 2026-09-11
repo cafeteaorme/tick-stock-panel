@@ -349,13 +349,13 @@ function DailyTradeChip({ trade, side, strategyName, onClick, signalNames }: { t
       isBuy ? 'border-accent/25 bg-accent/5' : 'border-border/70 bg-base/45'
     }`}>
       <span className="flex items-center gap-1">
-        <span className={`shrink-0 rounded px-1 py-px text-[9px] font-medium ${
+        <span className={`shrink-0 rounded px-1 py-px text-[10px] font-medium ${
           isBuy ? 'bg-accent/15 text-accent' : 'bg-elevated text-secondary'
         }`}>
           {isBuy ? '买' : '卖'}
         </span>
         <span className="min-w-0 flex-1 truncate text-foreground">{trade.name || trade.symbol}</span>
-        {tag && <span className={`shrink-0 rounded px-1 text-[9px] font-medium ${isBuy ? 'bg-accent/20 text-accent' : 'bg-elevated text-secondary'}`}>{tag}</span>}
+        {tag && <span className={`shrink-0 rounded px-1 text-[10px] font-medium ${isBuy ? 'bg-accent/20 text-accent' : 'bg-elevated text-secondary'}`}>{tag}</span>}
       </span>
       <span className="flex items-center justify-between gap-2 text-muted">
         <span className="min-w-0 truncate">
@@ -959,7 +959,7 @@ export function StrategyBacktest() {
   // 刷新页面后: 从 localStorage 恢复未完成的回测任务
   useEffect(() => {
     tryReconnect()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   useEffect(() => {
@@ -1331,9 +1331,9 @@ export function StrategyBacktest() {
                   highGranularity ? 'translate-x-[13px]' : 'translate-x-0.5'
                 }`} />
               </button>
-              <span className={`text-[9px] font-medium ${highGranularity ? 'text-amber-400' : 'text-muted/50'}`}>分钟成交</span>
+              <span className={`text-[10px] font-medium ${highGranularity ? 'text-amber-400' : 'text-muted/50'}`}>分钟成交</span>
               {!hasMinuteBatch && (
-                <span className="text-[8px] text-accent/70 font-medium bg-accent/10 px-1 py-px rounded">Pro+</span>
+                <span className="text-[10px] text-accent/70 font-medium bg-accent/10 px-1 py-px rounded">Pro+</span>
               )}
             </div>
           </div>
@@ -1382,7 +1382,7 @@ export function StrategyBacktest() {
               >
                 <span className="font-medium">{st.name}</span>
                 {st.source && st.source !== 'builtin' && (
-                  <span className={`ml-1 text-[8px] px-1 py-px rounded border ${BADGE_CLS_MAP[st.source] ?? ''}`}>
+                  <span className={`ml-1 text-[10px] px-1 py-px rounded border ${BADGE_CLS_MAP[st.source] ?? ''}`}>
                     {SRC_MAP[st.source] ?? ''}
                   </span>
                 )}
@@ -1410,7 +1410,7 @@ export function StrategyBacktest() {
           <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-secondary">
             <span className="truncate">{selectedStrategyName}</span>
             {selectedStrategySource && (
-              <span className={`shrink-0 text-[8px] px-1 py-px rounded border ${BADGE_CLS_MAP[selectedStrategySource] ?? ''}`}>
+              <span className={`shrink-0 text-[10px] px-1 py-px rounded border ${BADGE_CLS_MAP[selectedStrategySource] ?? ''}`}>
                 {SRC_MAP[selectedStrategySource] ?? selectedStrategySource}
               </span>
             )}
@@ -1856,10 +1856,10 @@ export function StrategyBacktest() {
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm font-medium text-foreground">{result.strategy_info.name}</span>
                   {result.stats.full_kind === 'candidate_execution' && (
-                    <span className="text-[9px] px-1 py-px rounded border border-accent/30 bg-accent/10 text-accent">全量独立执行</span>
+                    <span className="text-[10px] px-1 py-px rounded border border-accent/30 bg-accent/10 text-accent">全量独立执行</span>
                   )}
                   {result.strategy_info.source && (
-                    <span className={`text-[9px] px-1 py-px rounded border ${BADGE_CLS_MAP[result.strategy_info.source] ?? ''}`}>
+                    <span className={`text-[10px] px-1 py-px rounded border ${BADGE_CLS_MAP[result.strategy_info.source] ?? ''}`}>
                       {SRC_MAP[result.strategy_info.source] ?? ''}
                     </span>
                   )}
@@ -2236,7 +2236,7 @@ export function StrategyBacktest() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold text-foreground">高级策略设置</span>
-                    <span className={`text-[9px] px-1 py-px rounded border ${BADGE_CLS_MAP[detail.source] ?? ''}`}>
+                    <span className={`text-[10px] px-1 py-px rounded border ${BADGE_CLS_MAP[detail.source] ?? ''}`}>
                       {SRC_MAP[detail.source] ?? ''}
                     </span>
                   </div>

@@ -198,15 +198,15 @@ export function SettingsDataSourcesPanel() {
                     {item.display_name}
                   </span>
                   {item.name === 'tickflow' && (
-                    <span className="text-[9px] text-muted/50 uppercase tracking-wider shrink-0">内置</span>
+                    <span className="text-[10px] text-muted/50 uppercase tracking-wider shrink-0">内置</span>
                   )}
                   {pluginNames.has(item.name) && (
-                    <span className="text-[9px] text-muted/50 uppercase tracking-wider shrink-0">插件</span>
+                    <span className="text-[10px] text-muted/50 uppercase tracking-wider shrink-0">插件</span>
                   )}
                   {/* 右侧操作区: 插件未安装→安装按钮; 已激活→使用中; 否则→使用/卸载 */}
                   {pluginUnavailable ? (
                     installing ? (
-                      <span className="inline-flex items-center gap-1 text-[9px] text-accent shrink-0">
+                      <span className="inline-flex items-center gap-1 text-[10px] text-accent shrink-0">
                         <RefreshCw className="h-2.5 w-2.5 animate-spin" /> 安装中...
                       </span>
                     ) : (
@@ -219,7 +219,7 @@ export function SettingsDataSourcesPanel() {
                       </button>
                     )
                   ) : isActive ? (
-                    <span className="inline-flex items-center gap-0.5 text-[9px] text-accent shrink-0">
+                    <span className="inline-flex items-center gap-0.5 text-[10px] text-accent shrink-0">
                       <Check className="h-2.5 w-2.5" /> 使用中
                     </span>
                   ) : plugin ? (
@@ -258,7 +258,7 @@ export function SettingsDataSourcesPanel() {
                 {item.name !== 'tickflow' && item.datasets.length > 0 && (
                   <div className="flex flex-wrap gap-1 ml-3.5">
                     {item.datasets.map(ds => (
-                      <span key={ds} className="text-[9px] text-muted/60 bg-elevated/60 px-1 py-0.5 rounded">
+                      <span key={ds} className="text-[10px] text-muted/60 bg-elevated/60 px-1 py-0.5 rounded">
                         {DATASET_LABEL[ds] || ds}
                       </span>
                     ))}

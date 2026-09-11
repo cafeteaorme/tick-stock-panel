@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as echarts from 'echarts'
 import type { ECharts, EChartsOption } from 'echarts'
 import type { MinuteKlineRow, PriceLimitInfo } from '@/lib/api'
-import { useChartTheme, type ChartTheme } from '@/lib/theme'
+import { BULL, BEAR, useChartTheme, type ChartTheme } from '@/lib/theme'
 
 type YMode = 'adaptive' | 'limit'
 
@@ -175,11 +175,11 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
         symbol: m.side === 'B' ? 'triangle' : 'diamond',
         symbolSize: 13,
         symbolOffset: m.side === 'B' ? [0, 6] : [0, -6],
-        itemStyle: { color: m.side === 'B' ? '#C74040' : '#2D9B65', borderColor: 'rgba(255,255,255,0.85)', borderWidth: 1 },
+        itemStyle: { color: m.side === 'B' ? BULL : BEAR, borderColor: 'rgba(255,255,255,0.85)', borderWidth: 1 },
         label: {
           show: true, position: (m.side === 'B' ? 'bottom' : 'top') as 'bottom' | 'top', distance: 2,
           formatter: m.side, fontSize: 10, fontWeight: 'bold' as const,
-          color: m.side === 'B' ? '#C74040' : '#2D9B65',
+          color: m.side === 'B' ? BULL : BEAR,
         },
         _tip: `${m.side === 'B' ? '买入' : '卖出'} ${m.qty ?? ''}${m.qty != null ? ' 股 @ ' : '@ '}${m.price}`,
       }
@@ -478,7 +478,7 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
   const lastClose = data.length > 0 ? data[data.length - 1].close : null
   const lineIsUp = lastClose != null && prevClose != null ? lastClose > prevClose : true
   const lineIsFlat = lastClose != null && prevClose != null ? lastClose === prevClose : false
-  const lineColor = lineIsFlat ? '#A1A1AA' : lineIsUp ? '#C74040' : '#2D9B65'
+  const lineColor = lineIsFlat ? '#A1A1AA' : lineIsUp ? BULL : BEAR
   const areaFill = lineIsFlat ? 'rgba(180,180,190,0.40)' : lineIsUp ? 'rgba(199,64,64,0.40)' : 'rgba(34,197,94,0.40)'
 
   useEffect(() => {
@@ -570,7 +570,7 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
   const chg = d && prevClose != null ? d.close - prevClose : null
   const isUp = chg != null ? chg > 0 : true
   const isFlat = chg != null ? chg === 0 : false
-  const priceClr = isFlat ? '#A1A1AA' : isUp ? '#C74040' : '#2D9B65'
+  const priceClr = isFlat ? '#A1A1AA' : isUp ? BULL : BEAR
 
   return (
     <div className="w-full">

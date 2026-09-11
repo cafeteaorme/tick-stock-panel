@@ -1,3 +1,4 @@
+import { BULL, BEAR } from '@/lib/theme'
 /** 迷你蜡烛图（自选/策略列表共享）。 */
 import type { KlineRow } from '@/lib/api'
 
@@ -7,8 +8,6 @@ export function MiniCandlestick({ rows, width = 100, height = 80 }: { rows: Klin
     return <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block" aria-label="加载中" />
   }
 
-  const BULL = '#C74040'
-  const BEAR = '#2D9B65'
   const NEUTRAL = '#A1A1AA'
 
   const W = width

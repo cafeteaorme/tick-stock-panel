@@ -205,7 +205,7 @@ function BubbleItem({ task, isLast, onPointerDown }: {
         </span>
 
         {/* 状态后缀 */}
-        <span className="shrink-0 text-[9px] leading-none">
+        <span className="shrink-0 text-[10px] leading-none">
           {isWorking ? (
             <span className="text-purple-300/80">分析中</span>
           ) : isError ? (

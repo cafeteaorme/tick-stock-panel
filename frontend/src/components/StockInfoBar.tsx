@@ -4,9 +4,7 @@ import type { KlineRow, FinancialMetricRecord } from '@/lib/api'
 import { fmtPrice, fmtBigNum, fmtVolume } from '@/lib/format'
 import { ListColumnCustomizer } from '@/components/ListColumnCustomizer'
 import { INFO_GROUPS, type ColumnConfig } from '@/lib/stock-info-fields'
-
-const BULL = '#C74040'
-const BEAR = '#2D9B65'
+import { BULL, BEAR } from '@/lib/theme'
 
 interface Props {
   symbol: string

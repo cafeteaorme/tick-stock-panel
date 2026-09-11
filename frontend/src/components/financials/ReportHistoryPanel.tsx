@@ -78,7 +78,7 @@ export function ReportHistoryPanel() {
                   <span className="text-xs font-medium text-foreground truncate">{r.name || r.symbol}</span>
                   <span className="text-[10px] font-mono text-muted shrink-0">{r.symbol}</span>
                   {r.focus && (
-                    <span className="hidden sm:inline-block px-1.5 py-px rounded bg-purple-400/10 text-purple-300 text-[9px] shrink-0">
+                    <span className="hidden sm:inline-block px-1.5 py-px rounded bg-purple-400/10 text-purple-300 text-[10px] shrink-0">
                       {r.focus}
                     </span>
                   )}

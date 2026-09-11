@@ -28,6 +28,7 @@ import {
   startReviewGeneration, resetReview, isReviewGenerating,
   type ReviewPhase,
 } from '@/lib/reviewStore'
+import { BULL, BEAR } from '@/lib/theme'
 
 // ================================================================
 // 涨跌幅格式化(注意单位差异)
@@ -46,11 +47,11 @@ function pctClass(v: number | null | undefined): string {
 // A 股惯例: 强势=红, 弱式=绿(对齐 Dashboard scoreColor)
 function scoreColor(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return '#71717A'
-  if (v >= 70) return '#F04438'
+  if (v >= 70) return BULL
   if (v >= 55) return '#FB923C'
   if (v >= 45) return '#F59E0B'
   if (v >= 30) return '#84CC16'
-  return '#12B76A'
+  return BEAR
 }
 
 // 归档时刻格式化:ISO → "MM-DD HH:mm"(用于历史列表显示复盘时间)
@@ -439,8 +440,8 @@ export function Review() {
                       {reviewPushChannels.includes('feishu') && <Check className="h-2.5 w-2.5" />}
                     </span>
                     <span className="text-[11px] text-foreground">飞书</span>
-                    <span className="text-[9px] text-muted">群推送 Webhook</span>
-                    <span className={cn('ml-auto text-[9px]', feishuConfigured ? 'text-emerald-500' : 'text-warning')}>
+                    <span className="text-[10px] text-muted">群推送 Webhook</span>
+                    <span className={cn('ml-auto text-[10px]', feishuConfigured ? 'text-emerald-500' : 'text-warning')}>
                       {feishuConfigured ? '已配置' : '未配置'}
                     </span>
                   </button>
@@ -460,8 +461,8 @@ export function Review() {
                       {reviewPushChannels.includes('wecom') && <Check className="h-2.5 w-2.5" />}
                     </span>
                     <span className="text-[11px] text-foreground">企业微信</span>
-                    <span className="text-[9px] text-muted">群推送 Webhook</span>
-                    <span className={cn('ml-auto text-[9px]', wecomConfigured ? 'text-emerald-500' : 'text-warning')}>
+                    <span className="text-[10px] text-muted">群推送 Webhook</span>
+                    <span className={cn('ml-auto text-[10px]', wecomConfigured ? 'text-emerald-500' : 'text-warning')}>
                       {wecomConfigured ? '已配置' : '未配置'}
                     </span>
                   </button>
@@ -555,7 +556,7 @@ function MarketSummaryBar({ data }: { data: OverviewMarket }) {
         </span>
         <div className="leading-tight">
           <div className="text-[11px] font-medium text-foreground">{data.emotion?.label ?? '情绪'}</div>
-          <div className="text-[9px] text-secondary">情绪温度</div>
+          <div className="text-[10px] text-secondary">情绪温度</div>
         </div>
       </div>
 
@@ -821,7 +822,7 @@ function HistoryPanel({
                         : <span className="truncate text-[10px] text-secondary">{r.content.slice(0, 40)}</span>}
                     </div>
                     {r.created_at && (
-                      <div className="mt-0.5 font-mono text-[9px] text-muted">{fmtArchivedAt(r.created_at)}</div>
+                      <div className="mt-0.5 font-mono text-[10px] text-muted">{fmtArchivedAt(r.created_at)}</div>
                     )}
                   </div>
                   <button
