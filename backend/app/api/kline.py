@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
+import time as _time
 from datetime import date, timedelta
 from functools import lru_cache
 from typing import Optional
@@ -726,6 +728,46 @@ def get_minute_batch(request: Request, body: dict):
     return {"data": result}
 
 
+# 分时响应缓存: 盘中实时拉 TickFlow 需 7-35s, SSE 行情更新又会频繁重触发请求 →
+# 按 (symbol, date) 做短 TTL 缓存; 收盘后/历史日长 TTL
+_MINUTE_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
+_MINUTE_CACHE_LOCK = threading.Lock()
+
+
+def _minute_cache_ttl(trade_date: str) -> float:
+    try:
+        d = date.fromisoformat(trade_date)
+    except ValueError:
+        return 60.0
+    if d < cn_today():
+        return 3600.0  # 历史日不变
+    now = cn_now()
+    if now.weekday() >= 5 or (now.hour > 15 or (now.hour == 15 and now.minute >= 30)):
+        return 3600.0  # 已收盘
+    if now.hour < 9 or (now.hour == 9 and now.minute < 25):
+        return 600.0  # 未开盘
+    return 30.0  # 盘中
+
+
+def _minute_cache_get(key: tuple[str, str]) -> dict | None:
+    with _MINUTE_CACHE_LOCK:
+        hit = _MINUTE_CACHE.get(key)
+        if not hit:
+            return None
+        ts, payload = hit
+        if _time.monotonic() - ts > _minute_cache_ttl(key[1]):
+            _MINUTE_CACHE.pop(key, None)
+            return None
+        return payload
+
+
+def _minute_cache_put(key: tuple[str, str], payload: dict) -> None:
+    with _MINUTE_CACHE_LOCK:
+        if len(_MINUTE_CACHE) > 500:
+            _MINUTE_CACHE.clear()
+        _MINUTE_CACHE[key] = (_time.monotonic(), payload)
+
+
 @router.get("/minute")
 def get_minute(
     request: Request,
@@ -793,6 +835,10 @@ def get_minute(
             trade_date = recent if recent is not None else today
         else:
             trade_date = today
+    _ck = (symbol, str(trade_date))
+    _hit = _minute_cache_get(_ck)
+    if _hit is not None:
+        return _hit
     if trade_date is None:
         # 本地无任何分钟K，尝试从 TickFlow 拉取当天
         trade_date = cn_today()
@@ -800,12 +846,19 @@ def get_minute(
         price_limit = _get_price_limit_info(
             repo, symbol, trade_date, asset_type, stock_name,
         )
-        return {
+        payload = {
             "symbol": symbol, "name": stock_name, "stock_info": stock_info,
             "date": str(trade_date), "rows": df.to_dicts(), "source": "live",
             "asset_type": asset_type,
             "price_limit": price_limit,
         }
+        _minute_cache_put(_ck, payload)
+        return payload
+
+    _ck = (symbol, str(trade_date))
+    _hit = _minute_cache_get(_ck)
+    if _hit is not None:
+        return _hit
 
     price_limit = _get_price_limit_info(
         repo, symbol, trade_date, asset_type, stock_name,
@@ -832,22 +885,26 @@ def get_minute(
     is_complete = not df.is_empty() and len(df) >= expected * 0.9  # 允许 10% 容差
 
     if is_complete:
-        return {
+        payload = {
             "symbol": symbol, "name": stock_name, "stock_info": stock_info,
             "date": str(trade_date), "rows": df.to_dicts(), "source": "local",
             "asset_type": asset_type,
             "price_limit": price_limit,
         }
+        _minute_cache_put(_ck, payload)
+        return payload
 
     # 本地不完整或无数据 → 从 TickFlow 实时拉取
     live_df = kline_sync.fetch_minute_single(symbol, trade_date, asset_type=asset_type)
-    return {
+    payload = {
         "symbol": symbol, "name": stock_name, "stock_info": stock_info,
         "date": str(trade_date), "rows": live_df.to_dicts(),
         "source": "live" if not live_df.is_empty() else "none",
         "asset_type": asset_type,
         "price_limit": price_limit,
     }
+    _minute_cache_put(_ck, payload)
+    return payload
 
 
 @router.post("/sync")
