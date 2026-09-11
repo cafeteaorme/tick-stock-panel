@@ -803,11 +803,11 @@ function TzzbCookieDialog({ onClose, onConfigured }: { onClose: () => void; onCo
     setBusy('sync')
     try {
       const res = await api.holdingsTzzbSync()
-      if (res.ok) {
-        toast(res.message, 'success')
+      if (res.started) {
+        toast('同步已在后台开始，完成后自动提示', 'success')
         onConfigured()
       } else {
-        toast(res.message, 'error')
+        toast('已有同步任务在进行中', 'success')
       }
     } catch (e) {
       toast(e instanceof Error ? e.message : '同步失败', 'error')
@@ -1344,30 +1344,11 @@ function renderMd(text: string): React.ReactNode[] {
 
 type TzzbJob = { key: string; label?: string; status: string; ok?: boolean | null; message?: string; started_at?: string; finished_at?: string }
 
-function BgTasksPanel({ onClose }: { onClose: () => void }) {
+function BgTasksPanel({ jobs, onClose }: { jobs: TzzbJob[]; onClose: () => void }) {
   const qc = useQueryClient()
   const tasks = useQuery({ queryKey: ['holdings-bg-tasks'], queryFn: api.holdingsBgTasks, refetchInterval: 30_000 })
   const trades = useQuery({ queryKey: ['holdings-tzzb-trades'], queryFn: api.holdingsTzzbTrades })
-  // 拉取任务状态轮询: 运行中 1.5s, 空闲 8s; 运行→完成沿触发业务数据刷新与提示
-  const prevStatus = useRef<Record<string, string>>({})
-  const jobsQ = useQuery({
-    queryKey: ['holdings-tzzb-jobs'],
-    queryFn: api.holdingsTzzbJobs,
-    refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) => {
-      const jobs = q.state.data?.jobs ?? []
-      for (const j of jobs) {
-        const was = prevStatus.current[j.key]
-        if (was === 'running' && j.status === 'done') {
-          qc.invalidateQueries()
-          if (j.ok) toast(`${j.label || j.key}拉取完成：${j.message || ''}`, 'success')
-          else toast(`${j.label || j.key}失败：${j.message || ''}`, 'error')
-        }
-        prevStatus.current[j.key] = j.status
-      }
-      return jobs.some(j => j.status === 'running') ? 1_500 : 8_000
-    },
-  })
-  const jobs = jobsQ.data?.jobs ?? []
+  // 任务状态轮询提升到页面级 (Holdings 组件), 面板关闭时也能感知任务完成
   const jobOf = (k: string) => jobs.find(j => j.key === k)
   const running = (k: string) => jobOf(k)?.status === 'running'
   const start = (key: 'trades' | 'history', fn: () => Promise<unknown>) => {
@@ -1800,23 +1781,48 @@ export function Holdings() {
     refetchInterval: 60_000,
   })
 
+  // 账本后台任务轮询: 页面级常驻 (任务面板关闭时也能感知完成)。
+  // 运行中 1.5s, 空闲 8s; 运行→完成沿触发业务数据全量刷新与提示
+  const prevJobStatus = useRef<Record<string, string>>({})
+  const jobsQ = useQuery({
+    queryKey: ['holdings-tzzb-jobs'],
+    queryFn: api.holdingsTzzbJobs,
+    refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) => {
+      const jobs = q.state.data?.jobs ?? []
+      for (const j of jobs) {
+        const was = prevJobStatus.current[j.key]
+        if (was === 'running' && j.status === 'done') {
+          qc.invalidateQueries()
+          // 同步成功后链式更新真实成交缓存 (B/S 点 + 清仓核对数据源), 沿用原同步成功行为
+          if (j.key === 'sync' && j.ok) {
+            api.holdingsTzzbTradesRefresh()
+              .then(() => qc.invalidateQueries({ queryKey: ['holdings-tzzb-cleared-check'] }))
+              .catch(() => {})
+          }
+          if (j.ok) toast(`${j.label || j.key}完成：${j.message || ''}`, 'success')
+          else toast(`${j.label || j.key}失败：${j.message || ''}`, 'error')
+        }
+        prevJobStatus.current[j.key] = j.status
+      }
+      return jobs.some(j => j.status === 'running') ? 1_500 : 8_000
+    },
+  })
+
   const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)
     try {
       const res = await api.holdingsTzzbSync(activeAcc || undefined)
-      refreshAll()
-      qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+      qc.invalidateQueries({ queryKey: ['holdings-tzzb-jobs'] })
       qc.invalidateQueries({ queryKey: ['holdings-tzzb-status'] })
-      if (res.ok) {
-        toast(`${isRefresh ? '刷新' : '导入'}成功：${res.message}`, 'success')
-        // 手动刷新时异步更新真实成交缓存 (B/S 点 + 清仓核对数据源)
-        api.holdingsTzzbTradesRefresh()
-          .then(() => qc.invalidateQueries({ queryKey: ['holdings-tzzb-cleared-check'] }))
-          .catch(() => {})
+      // 同步已后台任务化: 数据刷新与成败提示由任务轮询的 running→done 沿触发
+      if (res.started) {
+        toast(`${isRefresh ? '刷新' : '导入'}已在后台开始，完成后自动提示`, 'success')
+      } else if (res.status === 'running') {
+        toast('已有同步任务在进行中', 'success')
       } else {
-        toast(`${isRefresh ? '刷新' : '导入'}失败：${res.message}`, 'error')
+        toast(`${isRefresh ? '刷新' : '导入'}未能启动：${res.message || '未知原因'}`, 'error')
       }
-      return res.ok
+      return res.started
     } catch (e) {
       toast(e instanceof Error ? e.message : '同步失败', 'error')
       return false
@@ -2276,7 +2282,7 @@ export function Holdings() {
         </div>
       </div>
 
-      {showTasks && <BgTasksPanel onClose={() => setShowTasks(false)} />}
+      {showTasks && <BgTasksPanel jobs={jobsQ.data?.jobs ?? []} onClose={() => setShowTasks(false)} />}
       {editing && <EditDialog row={editing} onClose={() => setEditing(null)} />}
 
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}

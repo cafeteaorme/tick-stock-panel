@@ -95,8 +95,9 @@ def ocr_status():
         ai_available = ai_prov.available()
         ai_model = resolve_vision_model()
         ai_reason = "" if ai_available else ai_prov.unavailable_reason()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        # 静默失败会让 UI 误报「AI未配」, 原因必须留痕
+        logger.warning("ai_vision status check failed: %s", e)
     return {
         "provider": provider.name,
         "available": provider.available() or ai_available,
@@ -167,7 +168,7 @@ def recent_photos(limit: int = Query(24, ge=1, le=96)):
     photos = []
     for mtime, path in candidates[:limit]:
         pr = path.resolve()
-        in_lib = str(pr).startswith(str(photos_root))
+        in_lib = pr.is_relative_to(photos_root)
         rel = pr.relative_to(photos_root).as_posix() if in_lib else pr.name
         url = (
             f"/api/watchlist/recent-photos/file?name={rel}"
@@ -190,13 +191,15 @@ def recent_photo_file(name: str = Query(""), ext: str = Query("")):
     if name:
         root = (Path.home() / "Pictures" / "Photos Library.photoslibrary").resolve()
         target = (root / name).resolve()
-        if not str(target).startswith(str(root)):
+        # is_relative_to 在 resolve 后做严格后代判断:
+        # startswith 前缀匹配可被同级目录名绕过 (如 "Photos Library.photoslibrary-evil/..")
+        if not target.is_relative_to(root):
             raise HTTPException(403, "非法路径")
     elif ext:
         target = None
         for base in (Path.home() / "Downloads", Path.home() / "Desktop", Path.home() / "Pictures"):
             cand = (base / ext).resolve()
-            if str(cand).startswith(str(base)) and cand.is_file():
+            if cand.is_relative_to(base) and cand.is_file():
                 target = cand
                 break
         if target is None:

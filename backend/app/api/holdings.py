@@ -173,8 +173,9 @@ def _compute_market(repo, symbols: list[str]) -> dict[str, dict]:
     etf_set = set()
     try:
         etf_set = repo.get_etf_symbol_set()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        # 失败会让 ETF 被误当个股处理, 留痕便于排查
+        logger.warning("get_etf_symbol_set failed: %s", e)
     cn_stocks = [s for s in cn if s not in etf_set]
     cn_etfs = [s for s in cn if s in etf_set]
 
@@ -722,21 +723,29 @@ def tzzb_history_fetch():
 
 @router.post("/tzzb/sync")
 def tzzb_sync(request: Request, account: str | None = Query(None)):
-    """从投资账本拉取数据 (点击「投资账本导入」/「刷新」按钮)。成功/失败都返回 message 供 toast。"""
+    """从投资账本拉取数据 (后台任务执行, 立即返回任务状态)。
+
+    同步涉及 CDP/多账户多请求, 可能长达数十秒, 不再阻塞 HTTP 请求线程;
+    进度与结果经 GET /tzzb/jobs 轮询 (前端任务面板有 running→done 沿的全量刷新+toast)。
+    """
     from app.services import tzzb
 
     acc = _acc(request, account)
-    try:
-        res = tzzb.sync(acc)
-    except Exception as e:  # noqa: BLE001
-        res = {"ok": False, "message": f"同步异常: {e}"}
-    if not res.get("ok"):
-        # 失败仅标记状态 (保留 Cookie——Cookie 可能有效, 可能只是端点未命中)
+
+    def _run() -> dict:
         try:
-            tzzb.save_config(last_ok=False)
-        except Exception:  # noqa: BLE001
-            pass
-    return res
+            res = tzzb.sync(acc)
+        except Exception as e:  # noqa: BLE001
+            res = {"ok": False, "message": f"同步异常: {e}"}
+        if not res.get("ok"):
+            # 失败仅标记状态 (保留 Cookie——Cookie 可能有效, 可能只是端点未命中)
+            try:
+                tzzb.save_config(last_ok=False)
+            except Exception:  # noqa: BLE001
+                pass
+        return res
+
+    return tzzb._job_run("sync", "投资账本同步", _run)
 
 
 @router.get("/held-symbols")

@@ -10,7 +10,6 @@ Cookie 获取方式: 浏览器登录 tzzb.10jqka.com.cn → F12 → Network → 
 from __future__ import annotations
 
 import ipaddress
-import hashlib
 import json
 import logging
 import re
@@ -52,6 +51,11 @@ def _store_path() -> Path:
     return p
 
 
+# 配置文件读-改-写锁: 同步线程/HK价格线程/API 线程会并发 save_config,
+# 无锁时互相覆盖更新 (如 cookie 与 last_sync 丢 one side)
+_CONFIG_LOCK = threading.Lock()
+
+
 def load_config() -> dict[str, Any]:
     try:
         return json.loads(_store_path().read_text("utf-8"))
@@ -60,13 +64,11 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(**updates: Any) -> dict[str, Any]:
-    import os
-    cfg = load_config()
-    cfg.update(updates)
-    tmp = _store_path().with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), "utf-8")
-    os.replace(tmp, _store_path())
-    return cfg
+    with _CONFIG_LOCK:
+        cfg = load_config()
+        cfg.update(updates)
+        _atomic_write_json(_store_path(), cfg)
+        return cfg
 
 
 def _assert_safe(url: str) -> None:
@@ -111,8 +113,10 @@ def _probe_hit(status: int, body: str) -> bool:
         return False
     flat = json.dumps(obj, ensure_ascii=False)
     bad = ("passport", "login.html", '"\u767b\u5f55"')  # 登录页跳转特征
-    if any(b in flat for b in bad) and "data" not in obj if isinstance(obj, dict) else False:
-        return False
+    # 仅对对象形态做登录壳剔除 (含登录特征且无 data 包装); 数组无 "data" 概念, 直接视为命中
+    if isinstance(obj, dict):
+        if any(b in flat for b in bad) and "data" not in obj:
+            return False
     return True
 
 
@@ -272,6 +276,12 @@ def start_background_sync() -> bool:
     return True
 
 
+def stop_background() -> None:
+    """通知两个后台线程退出 (lifespan shutdown 调用; 守护线程随进程退出, 这里保证可等退出)。"""
+    _hk_stop.set()
+    _sync_stop.set()
+
+
 _API_BASE = "https://tzzb.10jqka.com.cn/caishen_httpserver/tzzb"
 
 
@@ -290,138 +300,6 @@ def _cdp_new_tab(url: str) -> None:
     opener = _ur.build_opener(_ur.ProxyHandler({}))
     req = _ur.Request(f"http://127.0.0.1:{_CDP_PORT}/json/new?{urllib.parse.quote(url, safe='')}", method="PUT")
     opener.open(req, timeout=10).read()
-
-
-def _cdp_wait_page(timeout_s: float = 15) -> dict:
-    import time as _time
-
-    deadline = _time.time() + timeout_s
-    while _time.time() < deadline:
-        for t in _cdp_json("/json/list"):
-            if t.get("type") == "page":
-                return t
-        _time.sleep(0.5)
-    raise RuntimeError("CDP 无可用页面")
-
-
-def _cdp_capture(page_url: str, patterns: tuple[str, ...], wait_s: float = 12) -> dict[str, str]:
-    """打开页面, 捕获命中 patterns 的 XHR 响应体。返回 {url: body}。"""
-    import time as _time
-
-    import websocket
-
-    _cdp_new_tab(page_url)
-    time.sleep(1.0)
-    targets = _cdp_json("/json/list")
-    page = next((t for t in targets if t.get("type") == "page"
-                 and page_url.split("?")[0][-30:] in (t.get("url") or "")), None)
-    if not page:
-        page = next((t for t in targets if t.get("type") == "page"), None)
-    if not page:
-        raise RuntimeError("CDP 无可用页面")
-    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=int(wait_s + 10),
-                                     suppress_origin=True)
-    bodies: dict[str, str] = {}
-    pending: dict[str, str] = {}  # requestId -> url
-    try:
-        ws.send(json.dumps({"id": 1, "method": "Network.enable"}))
-        ws.send(json.dumps({"id": 2, "method": "Page.reload"}))
-        deadline = _time.time() + wait_s
-        ws.settimeout(1.0)
-        while _time.time() < deadline:
-            try:
-                msg = json.loads(ws.recv())
-            except Exception:
-                continue
-            meth = msg.get("method")
-            params = msg.get("params") or {}
-            if meth == "Network.requestWillBeSent":
-                u = params.get("request", {}).get("url", "")
-                if any(p in u for p in patterns):
-                    pending[params["requestId"]] = u
-            elif meth == "Network.loadingFinished" and params.get("requestId") in pending:
-                rid = params["requestId"]
-                u = pending.pop(rid)
-                try:
-                    rb = json.loads(json.dumps({"id": 100, "method": "Network.getResponseBody",
-                                                "params": {"requestId": rid}}))
-                    ws.send(json.dumps(rb))
-                    # 响应在后续 recv 到来 — 记入待匹配
-                except Exception:  # noqa: BLE001
-                    pass
-                bodies[u] = "__pending__" + rid
-        # 收集所有响应体 (统一再取一轮)
-        result = {}
-        for rid, u in list(pending.items()):
-            try:
-                rb = json.dumps({"id": 500, "method": "Network.getResponseBody",
-                                 "params": {"requestId": rid}})
-                ws.send(rb)
-            except Exception:  # noqa: BLE001
-                pass
-        _time.sleep(1.0)
-        return bodies if bodies else {}
-    finally:
-        ws.close()
-
-
-def _cdp_capture_api(trigger_url: str, patterns: tuple[str, ...], wait_s: float = 15) -> list[dict]:
-    """导航到 trigger_url, 捕获页面自身发出的命中 patterns 的接口响应体。
-
-    反爬 token 由页面 JS 自己带上, 我们只旁路截获响应 → 最可靠。
-    返回 [{url, post_data, body}], body 为原始字符串。
-    """
-    import base64  # noqa: F401
-    import time as _time
-
-    import websocket
-
-    page = _ensure_tzzb_page()
-    ws = websocket.create_connection(page["webSocketDebuggerUrl"],
-                                     timeout=int(wait_s + 15), suppress_origin=True)
-    results: list[dict] = []
-    pending: dict[str, dict] = {}   # requestId -> {url, post_data}
-    body_calls: dict[int, dict] = {}  # getResponseBody 调用 id -> entry
-    next_id = 100
-    try:
-        ws.send(json.dumps({"id": 1, "method": "Network.enable"}))
-        ws.send(json.dumps({"id": 2, "method": "Page.navigate", "params": {"url": trigger_url}}))
-        deadline = _time.time() + wait_s
-        ws.settimeout(1.0)
-        while _time.time() < deadline:
-            try:
-                msg = json.loads(ws.recv())
-            except Exception:  # noqa: BLE001
-                continue
-            meth = msg.get("method")
-            params = msg.get("params") or {}
-            if meth == "Network.requestWillBeSent":
-                req = params.get("request") or {}
-                u = req.get("url", "")
-                if any(p in u for p in patterns):
-                    pending[params["requestId"]] = {"url": u,
-                                                    "post_data": req.get("postData") or ""}
-            elif meth == "Network.loadingFailed" and params.get("requestId") in pending:
-                pending.pop(params["requestId"], None)
-            elif meth == "Network.loadingFinished" and params.get("requestId") in pending:
-                rid = params["requestId"]
-                entry = pending.pop(rid)
-                cid = next_id
-                next_id += 1
-                body_calls[cid] = entry
-                ws.send(json.dumps({"id": cid, "method": "Network.getResponseBody",
-                                    "params": {"requestId": rid}}))
-            elif "id" in msg and msg["id"] in body_calls and "result" in msg:
-                entry = body_calls.pop(msg["id"])
-                res = msg.get("result") or {}
-                body = res.get("body") or ""
-                if res.get("base64Encoded"):
-                    body = base64.b64decode(body).decode("utf-8", "replace")
-                entry["body"] = body
-                results.append(entry)
-        return results
-    finally:
-        ws.close()
 
 
 def open_login_window() -> dict[str, Any]:
@@ -675,7 +553,8 @@ def history_status() -> dict[str, Any]:
 def _atomic_write_json(path: Path, payload: dict) -> None:
     import os
 
-    tmp = path.with_suffix(".json.tmp")
+    # tmp 名含 pid+线程 id: 防止多线程并发写同一目标时互踩同一个 tmp 文件
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), "utf-8")
     os.replace(tmp, path)
 
@@ -1124,28 +1003,30 @@ def _trades_stale(max_hours: float = 12.0) -> bool:
 # ---------------------------------------------------------------- 后台任务状态
 
 _JOBS: dict[str, dict] = {}
+_JOBS_LOCK = threading.Lock()
 
 
 def _job_run(key: str, label: str, fn) -> dict:
     """后台线程执行 fn, 状态记入 _JOBS[key]; 同名任务运行中则拒绝重复启动。"""
-    import threading
-
-    st = _JOBS.setdefault(key, {"key": key, "label": label})
-    if st.get("status") == "running":
-        return {"started": False, **_job_state(st)}
-    st.update({"status": "running", "label": label, "ok": None, "message": "拉取中…",
-               "started_at": datetime.utcnow().isoformat(timespec="seconds"),
-               "finished_at": None})
+    with _JOBS_LOCK:
+        st = _JOBS.setdefault(key, {"key": key, "label": label})
+        if st.get("status") == "running":
+            return {"started": False, **_job_state(st)}
+        st.update({"status": "running", "label": label, "ok": None, "message": "拉取中…",
+                   "started_at": datetime.utcnow().isoformat(timespec="seconds"),
+                   "finished_at": None})
 
     def _wrap():
         try:
             res = fn()
-            st.update({"status": "done", "ok": bool(res.get("ok", True)) if isinstance(res, dict) else True,
-                       "message": str(res.get("message") or "完成") if isinstance(res, dict) else "完成",
-                       "finished_at": datetime.utcnow().isoformat(timespec="seconds")})
+            with _JOBS_LOCK:
+                st.update({"status": "done", "ok": bool(res.get("ok", True)) if isinstance(res, dict) else True,
+                           "message": str(res.get("message") or "完成") if isinstance(res, dict) else "完成",
+                           "finished_at": datetime.utcnow().isoformat(timespec="seconds")})
         except Exception as e:  # noqa: BLE001
-            st.update({"status": "done", "ok": False, "message": f"失败: {e}",
-                       "finished_at": datetime.utcnow().isoformat(timespec="seconds")})
+            with _JOBS_LOCK:
+                st.update({"status": "done", "ok": False, "message": f"失败: {e}",
+                           "finished_at": datetime.utcnow().isoformat(timespec="seconds")})
 
     threading.Thread(target=_wrap, daemon=True).start()
     return {"started": True, **_job_state(st)}
@@ -1156,7 +1037,8 @@ def _job_state(st: dict) -> dict:
 
 
 def job_states() -> list[dict]:
-    return [_job_state(st) for st in _JOBS.values()]
+    with _JOBS_LOCK:
+        return [_job_state(st) for st in list(_JOBS.values())]
 
 
 # ---------------------------------------------------------------- 港股通交收推算

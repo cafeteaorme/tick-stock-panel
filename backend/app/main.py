@@ -152,7 +152,6 @@ async def lifespan(app: FastAPI):
         from app.services import tzzb
         tzzb.start_background_sync()
         tzzb.start_hk_price_refresh()
-        tzzb.start_hk_price_refresh()
     except Exception as e:  # noqa: BLE001
         logger.warning("tzzb sync start failed: %s", e)
 
@@ -275,6 +274,16 @@ async def lifespan(app: FastAPI):
     wbot = getattr(app.state, "wecom_bot_service", None)
     if wbot:
         wbot.stop()
+    try:
+        from app.services import hk_us_intraday
+        hk_us_intraday.stop_background_refresh()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("hk_us_intraday stop failed: %s", e)
+    try:
+        from app.services import tzzb
+        tzzb.stop_background()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("tzzb stop failed: %s", e)
     logger.info("shutdown")
 
 

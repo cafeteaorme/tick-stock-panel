@@ -1573,7 +1573,7 @@ export const api = {
   holdingsTzzbHistoryFetch: () =>
     request<{ ok: boolean; message: string }>('/api/holdings/tzzb/history', { method: 'POST' }),
   holdingsTzzbSync: (account?: string) =>
-    request<{ ok: boolean; message: string; endpoint?: string; user_name?: string; imported?: number }>(
+    request<{ started: boolean; key: string; label?: string; status: string; ok?: boolean | null; message?: string }>(
       `/api/holdings/tzzb/sync${account ? `?account=${encodeURIComponent(account)}` : ''}`, { method: 'POST' },
     ),
   holdingsCreateAccount: (name: string) =>

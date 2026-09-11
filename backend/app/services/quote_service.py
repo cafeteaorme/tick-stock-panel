@@ -1511,8 +1511,9 @@ class QuoteService:
                 if factor_path and factor_path.exists():
                     try:
                         factors = pl.read_parquet(factor_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # 复权因子读取失败会让 enriched 以不复权价计算, 必须可见
+                        logger.warning("read %s failed, enriched falls back to raw prices: %s", factor_path, e)
                 instruments = self._repo.get_instruments() if asset_type == "stock" else None
 
                 enriched_full = compute_enriched(
