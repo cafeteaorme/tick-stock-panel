@@ -261,7 +261,7 @@ def upsert(account_id: str, symbol: str, qty: float,
         if k in _SCHEMA:
             row[k] = v
     if row["status"] == "closed":
-        # 清仓行: 同股旧 closed 行直接替换 (否则每次同步叠加一条), 顺带清掉残留 open 行
+        # 清仓行: 同股原位替换 (closed_at 来自账本真实清仓日, 稳定不漂移), 不叠加
         df = df.filter(pl.col("symbol") != symbol)
     else:
         # open 行: 只替换同股 open 行, 保留历史 closed 轮次

@@ -1031,7 +1031,7 @@ def tzzb_cleared_check(request: Request, account: str | None = Query(None)):
     ledger = [c for c in (tc.get("cleared") or [])
               if acc_name and c.get("account_name") == acc_name]
     ledger_map = {c["symbol"]: c for c in ledger}
-    local_rows = holdings_service.list_all(acc)
+    local_rows = holdings_service.list_all(acc, include_closed=True)
     local_closed = {r["symbol"]: r for r in local_rows if r.get("status") == "closed"}
 
     matched = [s for s in local_closed if s in ledger_map]

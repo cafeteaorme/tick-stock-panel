@@ -828,6 +828,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
     today = datetime.utcnow().date().isoformat()
     synced_accounts = []
     total_positions = 0
+    _tc = load_trades_cache()  # 派生清仓轮次: 回填真实清仓时间/已实现
 
     for b in brokers:
         fund_key = str(b.get("fund_key") or "")
@@ -873,13 +874,20 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
             if qty > 0:
                 holdings_svc.upsert(acc_id, symbol, qty, qty, cost, extras, source="tzzb")
             else:
-                # 已清仓 (数量 0): 记为 closed, 保留成本与已实现盈亏未知
+                # 已清仓 (数量 0): 本地原持有 → 卖出转清仓; 无持仓 → 用账本成交派生的真实清仓日/已实现落行
                 h = holdings_svc.get(acc_id, symbol)
-                if h:  # 本地原持有 → 转清仓
+                if h:
                     holdings_svc.sell(acc_id, symbol, _f(p.get("price")) or _f(cost) or 0)
                 else:
-                    holdings_svc.upsert(acc_id, symbol, 0, 0, cost,
-                                        {"status": "closed", "closed_at": datetime.utcnow().isoformat(timespec="seconds")})
+                    _rounds = [c for c in (_tc.get("cleared") or [])
+                               if c.get("account_id") == fund_key and c.get("symbol") == symbol]
+                    rnd = max(_rounds, key=lambda c: c.get("last_sell") or "") if _rounds else None
+                    closed_at = f"{rnd['last_sell']}T00:00:00" if rnd and rnd.get("last_sell") \
+                        else datetime.utcnow().isoformat(timespec="seconds")
+                    holdings_svc.upsert(acc_id, symbol, 0, 0, cost, {
+                        "status": "closed", "closed_at": closed_at,
+                        "realized_pnl": rnd.get("profit") if rnd else None,
+                    })
             if symbol not in {r["symbol"] for r in wl.list_symbols()}:
                 wl.add(symbol)
             holdings_rows.append({"symbol": symbol, "qty": qty, "available": qty,
@@ -940,6 +948,14 @@ def _norm_trade(r: dict, acc_name: str) -> dict | None:
         return None
     dt = str(r.get("transDateTime") or "")
     op = str(r.get("op") or "")
+    moneychg = _f_pl(r.get("moneychg"))
+    # 撤单/冲正识别: 资金流向与买卖方向矛盾 (真实买入 moneychg<0, 卖出 >0)
+    if moneychg is not None:
+        if op == "1" and moneychg > 0:
+            return None
+        if op == "2" and moneychg < 0:
+            return None
+    qty = _f_pl(r.get("trans_count"))
     return {
         "account_id": str(r.get("account_id") or ""),
         "account_name": acc_name,
@@ -949,7 +965,7 @@ def _norm_trade(r: dict, acc_name: str) -> dict | None:
         "time": dt[8:14] if len(dt) >= 14 else "",
         "bs": "B" if op == "1" else ("S" if op == "2" else "?"),
         "price": _f_pl(r.get("trans_price")),
-        "qty": _f_pl(r.get("trans_count")),
+        "qty": abs(qty) if qty is not None else None,  # 卖出记录 count 为负
         "amount": _f_pl(r.get("trans_amount")),
         "fee": _f_pl(r.get("trans_fee")),
         "profit": _f_pl(r.get("profit")),
@@ -985,13 +1001,14 @@ def _derive_cleared(trades: list[dict]) -> list[dict]:
                 profit += float(t.get("profit") or 0)
                 last_sell = t["date"]
                 if abs(qty) < 1e-6 and buy_qty > 0:
+                    realized = profit if profit else sell_amt - buy_cost  # 账本 profit 恒 0 时按成本推算
                     rounds.append({
                         "account_id": acc_id, "symbol": symbol, "name": name,
                         "first_buy": first_buy, "last_sell": last_sell,
                         "qty": round(buy_qty, 4),
                         "avg_cost": round(buy_cost / buy_qty, 4) if buy_qty else None,
                         "avg_sell": round(sell_amt / sell_qty, 4) if sell_qty else None,
-                        "profit": round(profit, 2), "fee": round(fee, 2),
+                        "profit": round(realized, 2), "fee": round(fee, 2),
                     })
                     qty = buy_cost = buy_qty = sell_qty = sell_amt = profit = fee = 0.0
                     first_buy = last_sell = None
