@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { api, type MinuteKlineRow } from '@/lib/api'
 import { QK } from '@/lib/queryKeys'
-import { EChartsIntraday } from '@/components/EChartsIntraday'
+import { EChartsIntraday, type IntradayBSMarker } from '@/components/EChartsIntraday'
 
 interface Props {
   symbol: string
@@ -39,6 +39,34 @@ export function StockIntradayChart({
     // 港美股: 已有数据时 60s 轮询 (后台也在刷新本地, 命中本地低延迟); A股沿用外部传入
     refetchInterval: refetchIntervalMs ?? (isHkUs ? 60_000 : undefined),
   })
+
+  // 真实成交 (投资账本): 当日成交按分钟聚合为 B/S 标记
+  const tzzbTrades = useQuery({
+    queryKey: ['holdings-tzzb-trades', symbol],
+    queryFn: () => api.holdingsTzzbTradesList(symbol),
+    enabled: !!symbol,
+    staleTime: 60_000,
+  })
+  const bsMarkers: IntradayBSMarker[] = useMemo(() => {
+    const all = tzzbTrades.data?.trades ?? []
+    const day = all.filter(t => t.date === date)
+    const byMin = new Map<string, { side: 'B' | 'S'; pq: number; q: number; n: number }>()
+    for (const t of day) {
+      if (t.bs !== 'B' && t.bs !== 'S') continue
+      const hhmm = (t.time ?? '').slice(0, 2) + ':' + (t.time ?? '').slice(2, 4)
+      const cur = byMin.get(hhmm) ?? { side: t.bs, pq: 0, q: 0, n: 0 }
+      cur.pq += (t.price ?? 0) * (t.qty ?? 0)
+      cur.q += t.qty ?? 0
+      cur.n += 1
+      byMin.set(hhmm, cur)
+    }
+    return [...byMin.entries()].map(([time, v]) => ({
+      time,
+      side: v.side,
+      price: v.q ? Math.round((v.pq / v.q) * 1000) / 1000 : 0,
+      qty: v.q,
+    })).sort((a, b) => a.time.localeCompare(b.time))
+  }, [tzzbTrades.data, date])
 
   const fetchMinute = useMutation({
     mutationFn: () => api.syncMinuteSingle(symbol),
@@ -138,6 +166,7 @@ export function StockIntradayChart({
           priceLimit={minute.data?.price_limit ?? undefined}
           onPriceHover={onPriceHover}
           region={region}
+          bsMarkers={bsMarkers}
         />
       )}
     </div>

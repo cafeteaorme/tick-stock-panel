@@ -15,6 +15,14 @@ const THEME = {
   volDown: 'rgba(18,183,106,0.6)',
 }
 
+/** 真实成交 B/S 标记 (投资账本, time 为 HH:MM 会话时间) */
+export interface IntradayBSMarker {
+  time: string
+  side: 'B' | 'S'
+  price: number
+  qty?: number
+}
+
 interface Props {
   data: MinuteKlineRow[]
   height?: number
@@ -26,6 +34,8 @@ interface Props {
   showAvgLine?: boolean
   /** 市场区域: 时间轴/成交量单位按区域切换 (CN 9:30-15:00 / HK 9:30-16:00 / US 美东 9:30-16:00) */
   region?: 'CN' | 'HK' | 'US'
+  /** 真实成交 B/S 点 (按分钟聚合) */
+  bsMarkers?: IntradayBSMarker[]
 }
 
 type Region = 'CN' | 'HK' | 'US'
@@ -116,7 +126,7 @@ function getLimitPrices(prevClose: number, priceLimit?: PriceLimitInfo): {
   return { limitUp, limitDown, upPct, downPct }
 }
 
-function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgPrices: number[], lineColor: string, areaColor: string, yMode: YMode, ct: ChartTheme, priceLimit?: PriceLimitInfo, showLimitLines = true, showAvgLine = true, region: Region = 'CN'): EChartsOption {
+function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgPrices: number[], lineColor: string, areaColor: string, yMode: YMode, ct: ChartTheme, priceLimit?: PriceLimitInfo, showLimitLines = true, showAvgLine = true, region: Region = 'CN', bsMarkers?: IntradayBSMarker[]): EChartsOption {
   // 将数据映射到全天时间轴上的正确位置
   const fullDayTimes = FULL_DAY_TIMES_BY_REGION[region]
   const timeIndexMap = new Map(fullDayTimes.map((t, i) => [t, i]))
@@ -154,6 +164,27 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
       ],
     },
   }
+
+  // 真实成交 B/S 散点: time(会话 HH:MM) → 全日轴索引, 值取成交价
+  const bsSeriesData = (bsMarkers ?? [])
+    .map(m => {
+      const idx = timeIndexMap.get(m.time)
+      if (idx === undefined || !isValidPrice(m.price)) return null
+      return {
+        value: [idx, m.price],
+        symbol: m.side === 'B' ? 'triangle' : 'diamond',
+        symbolSize: 13,
+        symbolOffset: m.side === 'B' ? [0, 6] : [0, -6],
+        itemStyle: { color: m.side === 'B' ? '#C74040' : '#2D9B65', borderColor: 'rgba(255,255,255,0.85)', borderWidth: 1 },
+        label: {
+          show: true, position: (m.side === 'B' ? 'bottom' : 'top') as 'bottom' | 'top', distance: 2,
+          formatter: m.side, fontSize: 10, fontWeight: 'bold' as const,
+          color: m.side === 'B' ? '#C74040' : '#2D9B65',
+        },
+        _tip: `${m.side === 'B' ? '买入' : '卖出'} ${m.qty ?? ''}${m.qty != null ? ' 股 @ ' : '@ '}${m.price}`,
+      }
+    })
+    .filter(Boolean)
 
   const markLineData: any[] = []
   if (prevClose != null) {
@@ -408,11 +439,25 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
         yAxisIndex: 1,
         cursor: 'crosshair',
       },
+      ...(bsSeriesData.length > 0 ? [{
+        name: '真实成交',
+        type: 'scatter' as const,
+        data: bsSeriesData,
+        z: 20,
+        cursor: 'pointer',
+        tooltip: {
+          trigger: 'item' as const,
+          formatter: (p: any) => p.data?._tip ?? '',
+          backgroundColor: 'rgba(24,24,27,0.92)',
+          borderWidth: 0,
+          textStyle: { color: '#e4e4e7', fontSize: 11 },
+        },
+      }] : []),
     ],
   }
 }
 
-export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimit, onPriceHover, showLimitLines = true, showAvgLine = true, region = 'CN' }: Props) {
+export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimit, onPriceHover, showLimitLines = true, showAvgLine = true, region = 'CN', bsMarkers }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ECharts | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
@@ -501,11 +546,11 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
       }
       fullDayToDataIdx.current = mapping
 
-      chart.setOption(buildOption(data, prevClose, avgPrices, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region), true)
+      chart.setOption(buildOption(data, prevClose, avgPrices, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region, bsMarkers), true)
     } else {
       chart.clear()
     }
-  }, [data, prevClose, height, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region])
+  }, [data, prevClose, height, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region, bsMarkers])
 
   useEffect(() => {
     return () => {

@@ -1508,6 +1508,10 @@ export const api = {
     ),
   holdingsTzzbTrades: () =>
     request<{ ok: boolean; fetched_at?: string; accounts: { fund_key: string; name: string; trades: number }[]; n_trades: number; n_cleared: number; n_bank: number }>('/api/holdings/tzzb/trades'),
+  holdingsTzzbTradesList: (symbol: string) =>
+    request<{ ok: boolean; trades: { date: string; time?: string; bs: string; price: number | null; qty: number | null; account_name: string }[] }>(
+      `/api/holdings/tzzb/trades?symbol=${encodeURIComponent(symbol)}`,
+    ),
   holdingsTzzbTradesRefresh: () =>
     request<{ started: boolean; status?: string }>('/api/holdings/tzzb/trades/refresh', { method: 'POST' }),
   holdingsTzzbJobs: () =>
