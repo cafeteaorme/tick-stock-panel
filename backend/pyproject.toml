@@ -2,13 +2,12 @@
 name = "tickflow-stock-panel-backend"
 version = "0.1.88"
 description = "A 股选股 + 监控 + 回测面板 — TickFlow 适配"
-readme = "../README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "pycryptodome>=3.20",
-]
 license = { text = "MIT" }
 dependencies = [
+    # Chrome Cookie 解密 (tzzb auto cookie)
+    "pycryptodome>=3.20",
+    "websocket-client>=1.8",      # tzzb CDP 取 Cookie (Network.getAllCookies)
     # Web
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

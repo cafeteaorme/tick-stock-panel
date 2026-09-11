@@ -109,9 +109,10 @@ def test_import_watchlist_image_with_fake_ocr(tmp_path: Path):
         provider=_FakeOcr(fake_text),
     )
     assert result["provider"] == "fake"
-    assert result["codes"] == ["600036", "515880"]
     assert result["matched_count"] == 2
     assert result["unmatched_count"] == 0
+    # 识别引擎大修后 code 字段保留显示名, 匹配以 symbol 为准
+    assert [c["symbol"] for c in result["candidates"]] == ["600036.SH", "515880.SH"]
 
 
 def test_import_unavailable_mentions_windows():
@@ -166,19 +167,37 @@ def test_preprocess_downsamples_large_edge():
 
 
 def test_ocr_status_reflects_provider(monkeypatch):
+    from app.services.watchlist_ocr import ai_vision as ai_vision_mod
+
+    class _FakeAiVision:
+        def available(self):
+            return False
+
+        def unavailable_reason(self):
+            return "测试环境未配置"
+
+    # 同时打桩 AI 视觉通道, 使断言不依赖本机 AI 配置
+    monkeypatch.setattr(ai_vision_mod, "AiVisionOcrProvider", _FakeAiVision)
+    monkeypatch.setattr(ai_vision_mod, "resolve_vision_model", lambda: "")
     monkeypatch.setattr(
         watchlist_api,
         "get_ocr_provider",
         lambda: _FakeOcr("", available=True),
     )
-    assert ocr_status() == {"provider": "fake", "available": True}
+    status = ocr_status()
+    assert status["provider"] == "fake"
+    assert status["available"] is True
+    assert status["engines"] == {"tesseract": True, "ai_vision": False}
 
     monkeypatch.setattr(
         watchlist_api,
         "get_ocr_provider",
         lambda: _FakeOcr("", available=False),
     )
-    assert ocr_status() == {"provider": "fake", "available": False}
+    status = ocr_status()
+    assert status["provider"] == "fake"
+    assert status["available"] is False
+    assert status["engines"] == {"tesseract": False, "ai_vision": False}
 
 
 @pytest.mark.asyncio

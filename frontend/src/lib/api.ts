@@ -1562,8 +1562,6 @@ export const api = {
     request<{ ok: boolean }>('/api/holdings/tzzb/cookie', { method: 'PUT', body: JSON.stringify({ cookie }) }),
   holdingsTzzbOpenLogin: () =>
     request<{ ok: boolean; message: string }>('/api/holdings/tzzb/open-login', { method: 'POST' }),
-  holdingsTzzbAutoCookie: () =>
-    request<{ ok: boolean; source?: string; message: string }>('/api/holdings/tzzb/autocookie', { method: 'POST' }),
   holdingsTzzbClear: () =>
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbHistoryData: () =>

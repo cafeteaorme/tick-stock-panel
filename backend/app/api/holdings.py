@@ -150,7 +150,7 @@ def _market_rows(request: Request, symbols: list[str], rates: dict) -> dict[str,
     if cached:
         return {k: v for k, v in cached.items() if k in symbols}
     out = {}
-    rows = holdings_service.list_all(request.app.state.repo.resolve_asset_type.__self__ and "") if False else _stored_rows(request)
+    rows = _stored_rows(request)
     for r in rows:
         sym = r["symbol"]
         if sym in symbols and r.get("price") is not None:
@@ -560,30 +560,12 @@ def tzzb_set_cookie(req: dict):
     return {"ok": True, "cookie_set": bool(cfg.get("cookie"))}
 
 
-@router.get("/tzzb/debug")
-def tzzb_debug():
-    from app.services import tzzb
-    return tzzb.debug_cookie_format()
-
-
 @router.post("/tzzb/open-login")
 def tzzb_open_login():
     """打开专用 Chrome 登录窗口 (用户登录一次, 配置目录持久记住登录态)。"""
     from app.services import tzzb
 
     return tzzb.open_login_window()
-
-
-@router.post("/tzzb/autocookie")
-def tzzb_autocookie():
-    """自动读取本机 Chrome 系浏览器的 10jqka Cookie (钥匙串授权 + AES 解密)。"""
-    from app.services import tzzb
-
-    res = tzzb.auto_read_browser_cookie()
-    if res.get("ok"):
-        tzzb.save_config(cookie=res["cookie"], last_ok=False)
-        return {"ok": True, "source": res.get("source"), "message": f"已从 {res['source']} 读取到 10jqka Cookie"}
-    return {"ok": False, "message": res.get("message", "自动读取失败")}
 
 
 @router.post("/tzzb/clear")
