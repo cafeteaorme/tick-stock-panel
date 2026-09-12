@@ -736,7 +736,7 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
             continue
         raw_name = (b.get("brokername") or b.get("manualname") or fund_key).strip()
         # 本地账户: 按名称匹配, 无则创建
-        acc_id = holdings_svc.find_account_by_name(raw_name) or holdings_svc.create_account(raw_name)["id"]
+        acc_id = holdings_svc.find_or_create_account(raw_name)
 
         pos_raw = _api("/caishen_fund/pc/asset/v1/stock_position", cookie,
                        {"fund_key": fund_key, "type": "common"})
@@ -1120,17 +1120,22 @@ def list_reports() -> list[dict]:
     return sorted(obj.get("reports") or [], key=lambda r: r.get("saved_at", ""), reverse=True)
 
 
+_REPORTS_LOCK = threading.Lock()
+
+
 def save_report(date: str, content: str, summary: str | None = None) -> dict:
     rep = {"id": f"r_{int(datetime.utcnow().timestamp()*1000)}", "date": date,
            "content": content, "summary": summary,
            "saved_at": datetime.utcnow().isoformat(timespec="seconds")}
-    obj = {"reports": list_reports()}
-    obj["reports"].append(rep)
-    _reports_path().write_text(json.dumps(obj, ensure_ascii=False, indent=1), "utf-8")
+    with _REPORTS_LOCK:
+        obj = {"reports": list_reports()}
+        obj["reports"].append(rep)
+        _atomic_write_json(_reports_path(), obj)
     return rep
 
 
 def delete_report(report_id: str) -> dict:
-    obj = {"reports": [r for r in list_reports() if r.get("id") != report_id]}
-    _reports_path().write_text(json.dumps(obj, ensure_ascii=False), "utf-8")
+    with _REPORTS_LOCK:
+        obj = {"reports": [r for r in list_reports() if r.get("id") != report_id]}
+        _atomic_write_json(_reports_path(), obj)
     return {"ok": True}

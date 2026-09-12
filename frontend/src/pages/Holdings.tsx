@@ -1605,6 +1605,7 @@ export function Holdings() {
     queryKey: [...QK.holdingsPnl(`${year}-01-01`), activeAcc],
     queryFn: () => api.holdingsPnl(`${year}-01-01`, undefined, activeAcc || undefined),
     enabled: !!activeAcc,
+    refetchInterval: 60_000, // 盘中收益日历随行情更新 (此前注释声称轮询但实际未配置)
     placeholderData: (prev) => prev,
   })
   const benchmark = useQuery({
@@ -1613,6 +1614,7 @@ export function Holdings() {
       const st = await api.holdingsSettings()
       return api.holdingsBenchmark(`${year}-01-01`, st.benchmark)
     },
+    refetchInterval: 60_000,
     enabled: !!activeAcc,
   })
   // 账本权威月度收益 (投资账本缓存)
@@ -1785,32 +1787,36 @@ export function Holdings() {
     refetchInterval: 60_000,
   })
 
-  // 账本后台任务轮询: 页面级常驻 (任务面板关闭时也能感知完成)。
-  // 运行中 1.5s, 空闲 8s; 运行→完成沿触发业务数据全量刷新与提示
-  const prevJobStatus = useRef<Record<string, string>>({})
+  // 账本后台任务轮询: 页面级常驻 (任务面板关闭时也能感知完成)。运行中 1.5s, 空闲 8s
   const jobsQ = useQuery({
     queryKey: QK.holdingsTzzbJobs,
     queryFn: api.holdingsTzzbJobs,
-    refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) => {
-      const jobs = q.state.data?.jobs ?? []
-      for (const j of jobs) {
-        const was = prevJobStatus.current[j.key]
-        if (was === 'running' && j.status === 'done') {
-          qc.invalidateQueries()
-          // 同步成功后链式更新真实成交缓存 (B/S 点 + 清仓核对数据源), 沿用原同步成功行为
-          if (j.key === 'sync' && j.ok) {
-            api.holdingsTzzbTradesRefresh()
-              .then(() => qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() }))
-              .catch(() => {})
-          }
-          if (j.ok) toast(`${j.label || j.key}完成：${j.message || ''}`, 'success')
-          else toast(`${j.label || j.key}失败：${j.message || ''}`, 'error')
-        }
-        prevJobStatus.current[j.key] = j.status
-      }
-      return jobs.some(j => j.status === 'running') ? 1_500 : 8_000
-    },
+    refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) =>
+      (q.state.data?.jobs ?? []).some(j => j.status === 'running') ? 1_500 : 8_000,
   })
+  // 运行→完成沿 (useEffect, 不在 refetchInterval 里做副作用):
+  // 只精确失效受影响的业务 key — 严禁无参 invalidateQueries (会清空全站缓存, 触发全应用请求风暴)
+  const prevJobStatus = useRef<Record<string, string>>({})
+  useEffect(() => {
+    for (const j of jobsQ.data?.jobs ?? []) {
+      const was = prevJobStatus.current[j.key]
+      prevJobStatus.current[j.key] = j.status
+      if (was !== 'running' || j.status !== 'done') continue
+      qc.invalidateQueries({ queryKey: QK.holdings })
+      qc.invalidateQueries({ queryKey: QK.holdingsSummary })
+      qc.invalidateQueries({ queryKey: ['holdings-pnl'] })
+      qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+      qc.invalidateQueries({ queryKey: QK.holdingsTzzbJobs })
+      // 同步成功后链式更新真实成交缓存 (B/S 点 + 清仓核对数据源)
+      if (j.key === 'sync' && j.ok) {
+        api.holdingsTzzbTradesRefresh()
+          .then(() => qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() }))
+          .catch(() => {})
+      }
+      if (j.ok) toast(`${j.label || j.key}完成：${j.message || ''}`, 'success')
+      else toast(`${j.label || j.key}失败：${j.message || ''}`, 'error')
+    }
+  }, [jobsQ.data, qc])
 
   const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)

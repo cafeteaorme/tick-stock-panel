@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -149,6 +151,15 @@ def resolve_account(account_id: str | None) -> str:
     return DEFAULT_ACCOUNT
 
 
+def find_or_create_account(name: str) -> str:
+    """按名称找账户, 无则创建 (锁内原子, 防并发同步产生同名重复账户)。"""
+    with _ACCOUNTS_LOCK:
+        acc_id = find_account_by_name(name)
+        if acc_id:
+            return acc_id
+        return create_account(name)["id"]
+
+
 def find_account_by_name(name: str) -> str | None:
     obj = list_accounts()
     for a in obj["accounts"]:
@@ -222,8 +233,39 @@ def _read(account_id: str) -> pl.DataFrame:
     return df
 
 
+# 账户级写锁: upsert/sell/remove 等读-改-写区间串行化, 防并发后写覆盖前写 (丢行)
+_ACC_LOCKS: dict[str, threading.Lock] = {}
+_ACC_LOCKS_GUARD = threading.Lock()
+# 全局锁: 保护 accounts.json 的 find+create 读改写 (防同名重复账户)
+_ACCOUNTS_LOCK = threading.Lock()
+
+
+def _acc_lock(account_id: str) -> threading.Lock:
+    with _ACC_LOCKS_GUARD:
+        lock = _ACC_LOCKS.get(account_id)
+        if lock is None:
+            lock = threading.Lock()
+            _ACC_LOCKS[account_id] = lock
+        return lock
+
+
+def _locked(fn):
+    """账户级写锁: 修饰首个参数为 account_id 的变更操作, 读-改-写区间串行化。"""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(account_id, *args, **kwargs):
+        with _acc_lock(account_id):
+            return fn(account_id, *args, **kwargs)
+    return wrapper
+
+
 def _write(account_id: str, df: pl.DataFrame) -> None:
-    df.write_parquet(_schema_path(account_id))
+    """原子写 parquet: 临时文件 + os.replace, 读侧永不看到半写文件。"""
+    path = _schema_path(account_id)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    df.write_parquet(tmp)
+    os.replace(tmp, path)
 
 
 def list_all(account_id: str, include_closed: bool = False) -> list[dict[str, Any]]:
@@ -241,6 +283,7 @@ def get(account_id: str, symbol: str) -> dict[str, Any] | None:
     return hit.to_dicts()[0] if not hit.is_empty() else None
 
 
+@_locked
 def upsert(account_id: str, symbol: str, qty: float,
            available: float | None = None, avg_cost: float | None = None,
            extras: dict | None = None, source: str = "tzzb") -> list[dict]:
@@ -271,6 +314,7 @@ def upsert(account_id: str, symbol: str, qty: float,
     return list_all(account_id)
 
 
+@_locked
 def sell(account_id: str, symbol: str, price: float, qty: float | None = None) -> dict[str, Any]:
     h = get(account_id, symbol)
     if h is None:
@@ -317,12 +361,14 @@ def sell(account_id: str, symbol: str, price: float, qty: float | None = None) -
     return {"symbol": symbol, "realized_pnl": realized}
 
 
+@_locked
 def remove(account_id: str, symbol: str) -> list[dict]:
     df = _read(account_id).filter(pl.col("symbol") != symbol)
     _write(account_id, df)
     return list_all(account_id, include_closed=True)
 
 
+@_locked
 def remove_stale_tzzb(account_id: str, valid_symbols: set[str]) -> list[str]:
     """同步清理: 删除不在最新账本持仓中的 tzzb 来源 open 行 (保护手动/截图来源)。"""
     df = _read(account_id)
@@ -341,6 +387,7 @@ def remove_stale_tzzb(account_id: str, valid_symbols: set[str]) -> list[str]:
     return names
 
 
+@_locked
 def reset(account_id: str, include_portfolio: bool = True) -> int:
     """重置当前账户: 清空持仓与快照 (可选资金设置)。返回删除的持仓行数。"""
     df = _read(account_id)
@@ -413,6 +460,7 @@ def snapshot_keep_limit() -> int:
     return preferences.get_holdings_snapshot_keep()
 
 
+@_locked
 def save_snapshot(account_id: str, date_iso: str, rows: list[dict] | None = None, cash: float | None = None) -> dict:
     obj_rows = rows if rows is not None else list_all(account_id)
     port = get_portfolio(account_id)
@@ -426,9 +474,8 @@ def save_snapshot(account_id: str, date_iso: str, rows: list[dict] | None = None
         ],
         "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
-    (_snap_dir(account_id) / f"{date_iso.replace('-', '')}.json").write_text(
-        json.dumps(obj, ensure_ascii=False), "utf-8"
-    )
+    _atomic_write(_snap_dir(account_id) / f"{date_iso.replace('-', '')}.json",
+                  json.dumps(obj, ensure_ascii=False))
     _cleanup_snapshots(account_id, snapshot_keep_limit())
     return obj
 

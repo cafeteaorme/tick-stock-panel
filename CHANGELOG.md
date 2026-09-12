@@ -35,6 +35,18 @@
 - **ESLint 落地**: 新增 flat config, `pnpm lint` 从"无配置空转"变为可用 (0 错误); 顺带修复 lint 抓到的真 bug——MiniIntraday 的 `useId` 在提前 return 之后条件调用
 - **小项**: theme-color 从紫色对齐 accent 蓝; 隐藏标签页停止 15s 轮询 (省电); 仓库内编译产物 (vite.config.js/.d.ts) 移出并进 gitignore; 高频 query key 收进 QK 常量
 
+## 0.1.88-0.48 (2026-09-13)
+
+### 四模型联合审查 · 第一批修复 (P0 + 快赢)
+
+- **[P0] 持仓 parquet 并发写丢更新**: upsert/sell/remove/remove_stale_tzzb/reset/save_snapshot 加账户级写锁 (读-改-写区间串行化), parquet 改临时文件 + os.replace 原子落盘, 快照 JSON 同步原子化 — 杜绝「截图导入 + 账本同步 + 港股刷新并发时整行丢失」与半写读取
+- **[P1] pnl 失效 key 错配**: 失效用 ['holdings-pnl','default'] 前缀匹配不到实际查询 key ['holdings-pnl','日期',账户] → 卖出/删仓/改本金后收益日历与累计盈亏不刷新。改用 ['holdings-pnl'] 前缀 (4 处)
+- **[P1] 任务完成全站请求风暴**: 账本任务完成时无参 invalidateQueries() 清空全应用缓存 → 收窄为精确 key 集合 (holdings/summary/pnl/accounts/jobs), 副作用从 refetchInterval 移入 useEffect
+- **[P1] pnl/benchmark 盘中不刷新**: 注释声称走 60s 轮询但实际未配置 → 补 refetchInterval
+- **[P1] AI 报告并发丢失**: 保存/删除改 _atomic_write_json + 模块锁
+- 账户 find+create 收敛为 find_or_create_account (锁内原子, 防并发同步重复建户)
+
+来源: 四模型审查 (M3 后端 / DeepSeek 前端 / GPT 架构), 报告存 OpenViking project-tickflow-review
 ## 0.1.88-0.46 (2026-09-11)
 
 ### 修复: 分时图「无法加载」
