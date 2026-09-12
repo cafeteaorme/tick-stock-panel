@@ -261,20 +261,27 @@ function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: string; 
 function EChart({ option, height }: { option: any; height: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ECharts | null>(null)
+  const optionRef = useRef(option)
+  optionRef.current = option
+  // 挂载: 动态 import 后 init 一次; 数据变化只 setOption (避免 SSE 高频下 dispose/重建)
   useEffect(() => {
-    if (!ref.current) return
+    let cancelled = false
     import('echarts').then(echarts => {
-      if (!ref.current) return
+      if (cancelled || !ref.current) return
       if (!chartRef.current) chartRef.current = echarts.init(ref.current)
-      chartRef.current.setOption(option, true)
+      chartRef.current.setOption(optionRef.current, true)
     })
     const onResize = () => chartRef.current?.resize()
     window.addEventListener('resize', onResize)
     return () => {
+      cancelled = true
       window.removeEventListener('resize', onResize)
       chartRef.current?.dispose()
       chartRef.current = null
     }
+  }, [])
+  useEffect(() => {
+    chartRef.current?.setOption(option, true)
   }, [option])
   return <div ref={ref} style={{ height }} />
 }
@@ -368,7 +375,7 @@ function HoldingsPie({ rows }: { rows: HoldingRow[] }) {
  * 编辑/卖出 / 资金设置 / 手动添加
  * ================================================================ */
 
-function EditDialog({ row, onClose }: { row: HoldingRow; onClose: () => void }) {
+function EditDialog({ row, onClose, account }: { row: HoldingRow; onClose: () => void; account?: string }) {
   const qc = useQueryClient()
   const [qty, setQty] = useState(String(row.qty))
   const [available, setAvailable] = useState(row.available != null ? String(row.available) : '')
@@ -381,7 +388,7 @@ function EditDialog({ row, onClose }: { row: HoldingRow; onClose: () => void }) 
   const refreshPrice = async () => {
     setFetchingPrice(true)
     try {
-      const latest = await api.holdingsList()
+      const latest = await api.holdingsList(false, account)
       const hit = latest.rows.find(r => r.symbol === row.symbol)
       if (hit?.price != null) setSellPrice(String(hit.price))
       else toast('未取到实时价', 'error')
@@ -1527,14 +1534,17 @@ export function Holdings() {
   const [previewSymbol, setPreviewSymbol] = useState<string | null>(null)
   const [previewName, setPreviewName] = useState('')
   const [previewMarkers, setPreviewMarkers] = useState<any[] | undefined>(undefined)
+  const previewReqRef = useRef(0)
   const [previewMarkerSrc, setPreviewMarkerSrc] = useState<'tzzb' | 'calc' | undefined>(undefined)
   const openPreview = (sym: string, name: string) => {
+    const reqId = ++previewReqRef.current
     setPreviewSymbol(sym)
     setPreviewName(name)
     setPreviewMarkers(undefined)
     setPreviewMarkerSrc(undefined)
-    // 持仓股: 拉 B/S 买卖点 (账本真实成交优先, 快照推算兜底)
+    // 持仓股: 拉 B/S 买卖点 (账本真实成交优先, 快照推算兜底); 响应带序号守卫防快速切股竞态
     api.holdingsTrades(sym, activeAcc || undefined).then(d => {
+      if (reqId !== previewReqRef.current) return
       const mk = (d.events ?? []).map(ev => ({
         date: ev.date,
         kind: ev.type === 'B' ? 'buy' : 'sell',
@@ -2293,7 +2303,7 @@ export function Holdings() {
       </div>
 
       {showTasks && <BgTasksPanel jobs={jobsQ.data?.jobs ?? []} onClose={() => setShowTasks(false)} />}
-      {editing && <EditDialog row={editing} onClose={() => setEditing(null)} />}
+      {editing && <EditDialog row={editing} onClose={() => setEditing(null)} account={activeAcc} />}
 
       {showAdd && <AddDialog onClose={() => setShowAdd(false)} />}
       {showSettings && summary?.data && (

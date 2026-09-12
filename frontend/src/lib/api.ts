@@ -39,7 +39,15 @@ async function request<T>(path: string, init?: RequestOptions): Promise<T> {
     if (res.status !== 401 && !quiet) toast(msg, 'error')
     throw new Error(msg)
   }
-  return res.json() as Promise<T>
+  // 204/空响应体 (部分 DELETE/POST 返回空) 不能 res.json() — 会抛 SyntaxError 把成功当失败
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  if (!text) return undefined as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return undefined as T
+  }
 }
 
 // 流式 (NDJSON) 请求统一入口。之前 6 个 AI 流式端点各自复制

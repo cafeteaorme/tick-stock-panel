@@ -870,6 +870,12 @@ export function EChartsCandlestick({
     dates.forEach((d, i) => m.set(d, i))
     return m
   }, [dates])
+  const markersRef = useRef(markers)
+  const dateIndexMapRef = useRef(dateIndexMap)
+  const showMarkersRef = useRef(showMarkersProp)
+  markersRef.current = markers
+  dateIndexMapRef.current = dateIndexMap
+  showMarkersRef.current = showMarkersProp
 
   // 计算 dataZoom 初始范围
   const initialZoom = useMemo(() => ({
@@ -1024,14 +1030,14 @@ export function EChartsCandlestick({
   function updateCompactPresentation() {
     const chart = chartRef.current
     if (!chart) return
-    const mkrs = showMarkersProp ? markers : undefined
+    const mkrs = showMarkersRef.current ? markersRef.current : undefined
     const compact = compactRef.current
     const seriesUpdates: any[] = []
     const markPointData: any[] = []
     for (const m of mkrs ?? []) {
-      const idx = dateIndexMap.get(m.date)
+      const idx = dateIndexMapRef.current.get(m.date)
       if (idx == null) continue
-      const d = data[idx]
+      const d = dataRef.current[idx]
       const isBuy = m.kind === 'buy'
       const isSell = m.kind === 'sell'
       if (m.above) {

@@ -35,6 +35,15 @@
 - **ESLint 落地**: 新增 flat config, `pnpm lint` 从"无配置空转"变为可用 (0 错误); 顺带修复 lint 抓到的真 bug——MiniIntraday 的 `useId` 在提前 return 之后条件调用
 - **小项**: theme-color 从紫色对齐 accent 蓝; 隐藏标签页停止 15s 轮询 (省电); 仓库内编译产物 (vite.config.js/.d.ts) 移出并进 gitignore; 高频 query key 收进 QK 常量
 
+## 0.1.88-0.50 (2026-09-13)
+
+### 四模型联合审查 · 第三批修复 (前端正确性)
+
+- **ECharts 封装重构**: init 只在挂载时执行一次, 数据变化仅 setOption — 修复 SSE 高频行情下每次 option 变化都 dispose/重建实例的浪费; 动态 import 加 cancelled 守卫防卸载后泄漏
+- **K 线 dataZoom 过期闭包**: compact 标记增量更新改读 markers/dateIndexMap/data 的 ref — 此前缩放时可能用旧数据渲染标记
+- **编辑弹窗取实时价**: 补传当前账户 id, 防多账户下取到别的账户的价格填入卖出价
+- **个股预览切股竞态**: B/S 拉取加请求序号守卫, 快速连点 A/B 不再出现「点 B 显示 A 的买卖点」
+- **request() 空响应处理**: 204/空体不再 res.json() 抛 SyntaxError 把成功当失败
 ## 0.1.88-0.49 (2026-09-13)
 
 ### 四模型联合审查 · 第二批修复 (并发治理)
