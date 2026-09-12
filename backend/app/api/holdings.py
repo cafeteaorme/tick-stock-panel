@@ -1010,12 +1010,35 @@ def tzzb_jobs():
     return {"jobs": tzzb.job_states()}
 
 
+_CLEARED_CHECK_CACHE: dict[tuple, tuple[float, dict]] = {}
+
+
 @router.get("/tzzb/cleared-check")
 def tzzb_cleared_check(request: Request, account: str | None = Query(None)):
-    """清仓核对: 账本成交派生的清仓轮次 vs 本地已清仓行。"""
+    """清仓核对: 账本成交派生的清仓轮次 vs 本地已清仓行 (60s 缓存, 数据文件变更即失效)。"""
+    from app.config import settings
     from app.services import tzzb as tzzb_svc
 
     acc = _acc(request, account)
+    # 缓存键: 账户 + 两个数据文件的 mtime (成交缓存/持仓 parquet 任一变更即失效)
+    trades_fp = settings.data_dir / "user_data" / "tzzb_trades.json"
+    acc_fp = settings.data_dir / "user_data" / "holdings" / acc / "holdings.parquet"
+    sig = (acc,
+           trades_fp.stat().st_mtime if trades_fp.exists() else 0,
+           acc_fp.stat().st_mtime if acc_fp.exists() else 0)
+    now = _time.monotonic()
+    hit = _CLEARED_CHECK_CACHE.get(sig)
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    result = _cleared_check_impl(request, acc, tzzb_svc)
+    if len(_CLEARED_CHECK_CACHE) > 64:
+        _CLEARED_CHECK_CACHE.clear()
+    _CLEARED_CHECK_CACHE[sig] = (now, result)
+    return result
+
+
+def _cleared_check_impl(request: Request, acc: str, tzzb_svc) -> dict:
+    from app.services import holdings as holdings_service
     tc = tzzb_svc.load_trades_cache()
     if not tc.get("ok"):
         return {"ok": False, "message": "无成交缓存 (先刷新投资账本)"}

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import math
 import threading
 import time as _time
 from datetime import date, timedelta
+from pathlib import Path
 from functools import lru_cache
 from typing import Optional
 
@@ -1117,8 +1119,21 @@ async def clear_minute(request: Request):
             removed = result[0] if result else 0
         except Exception:  # noqa: BLE001
             pass
-        # 仅删 kline_minute 目录, 绝不触碰其他目录
-        shutil.rmtree(minute_dir, ignore_errors=True)
+        # 仅删 kline_minute 目录, 绝不触碰其他目录; 删除失败必须上抛 (禁止静默)
+        errors: list[str] = []
+        for root, _dirs, files in os.walk(minute_dir, topdown=False):
+            for f in files:
+                try:
+                    (Path(root) / f).unlink()
+                except OSError as e:
+                    errors.append(f"{f}: {e}")
+            try:
+                os.rmdir(root)
+            except OSError:
+                pass  # 非空目录留给下一次 (文件删除失败已上报)
+        if errors:
+            raise HTTPException(status_code=500,
+                                detail=f"分钟K删除部分失败: {errors[:3]}{'…' if len(errors) > 3 else ''}")
 
     # 刷新视图 (重建空视图)
     from app.jobs.daily_pipeline import _refresh_single_view

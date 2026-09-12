@@ -714,11 +714,26 @@ def fetch_history_cache() -> dict[str, Any]:
     return {"ok": True, "message": f"历史收益缓存成功：{len(monthly_acc)} 个月（{fetched_months} 条记录），资产趋势 {len(trend_list)} 天"}
 
 
+_SYNC_INFLIGHT = threading.Lock()
+
+
 def sync(account_id: str | None = None) -> dict[str, Any]:
-    """同步投资账本: CDP 取 Cookie → 遍历券商账户 → 持仓写入本地 (当日持仓 + 快照)。"""
+    """同步投资账本: CDP 取 Cookie → 遍历券商账户 → 持仓写入本地 (当日持仓 + 快照)。
+
+    进程内互斥: 手动/定时/盘中同步重入时直接跳过 (后者由前者覆盖)。
+    """
     from app.services import holdings as holdings_svc
     from app.services import watchlist as wl
 
+    if not _SYNC_INFLIGHT.acquire(blocking=False):
+        return {"ok": True, "skipped": True, "message": "已有同步任务执行中, 本次跳过"}
+    try:
+        return _sync_impl(account_id, holdings_svc, wl)
+    finally:
+        _SYNC_INFLIGHT.release()
+
+
+def _sync_impl(account_id: str | None, holdings_svc, wl) -> dict[str, Any]:
     cookie = _cdp_cookie()
     save_config(cookie=cookie)
 
@@ -808,12 +823,8 @@ def sync(account_id: str | None = None) -> dict[str, Any]:
 
     # 成交/清仓缓存 (>12h 才刷新, 异步不阻塞同步)
     if _trades_stale():
-        def _safe_fetch_trades():
-            try:
-                fetch_trades_cache()
-            except Exception as e:  # noqa: BLE001
-                logger.warning("trades cache refresh failed: %s", e)
-        threading.Thread(target=_safe_fetch_trades, daemon=True).start()
+        # 复用任务通道: running 时自动去重, 状态可在 /tzzb/jobs 查看
+        _job_run("trades", "真实成交", fetch_trades_cache)
 
     return {"ok": True, "message": f"同步成功：{len(synced_accounts)} 个账户，共 {total_positions} 条持仓",
             "accounts": synced_accounts}
@@ -1044,12 +1055,14 @@ def job_states() -> list[dict]:
 # ---------------------------------------------------------------- 港股通交收推算
 
 _TD_CACHE: dict[str, dict] = {}
+_TD_LOCK = threading.Lock()
 
 
 def trading_day_info(date_iso: str) -> dict | None:
-    """指定日期的两地交易日信息 (账本 last_trading_day 接口, 进程内缓存)。"""
-    if date_iso in _TD_CACHE:
-        return _TD_CACHE[date_iso]
+    """指定日期的两地交易日信息 (账本 last_trading_day 接口, 进程内缓存, 加锁)。"""
+    with _TD_LOCK:
+        if date_iso in _TD_CACHE:
+            return _TD_CACHE[date_iso]
     cookie = _cdp_cookie()
     try:
         ex = _api("/caishen_fund/stock_common/v1/last_trading_day", cookie, {"date": date_iso})
@@ -1062,7 +1075,10 @@ def trading_day_info(date_iso: str) -> dict | None:
         "next_cn": ex.get("next_trading_day"),
         "next_hk": ex.get("next_hk_trading_day"),
     }
-    _TD_CACHE[date_iso] = info
+    with _TD_LOCK:
+        if len(_TD_CACHE) > 400:  # 上界保护
+            _TD_CACHE.clear()
+        _TD_CACHE[date_iso] = info
     return info
 
 

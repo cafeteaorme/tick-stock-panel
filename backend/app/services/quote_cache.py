@@ -20,6 +20,9 @@ _cache: dict[str, tuple[float, dict[str, dict]]] = {
     "rows": {},
 }
 _lock = threading.Lock()
+_inflight: set[str] = set()
+_missing_until: dict[str, float] = {}
+_MISSING_TTL_S = 300.0  # 拉取仍缺失的 symbol 5 分钟内不再重试
 
 
 def invalidate() -> None:
@@ -51,11 +54,27 @@ def get_quotes(
 
     # 缺漏或过期 → 刷新 (锁外调用, 避免持锁等待网络)
     missing = [s for s in symbols if s not in rows] or ([] if fresh else symbols)
+    # 负缓存: 最近拉取仍缺失的 symbol 短期跳过, 防退市/停牌股每 TTL 无效重试
+    want = [s for s in dict.fromkeys(missing or symbols) if _missing_until.get(s, 0) < now]
+    if not want:
+        return hit
+    # inflight 去重: 同批 symbols 并发请求只放一个真正执行 fetch, 其余直接返回现有缓存
+    batch_key = ",".join(sorted(want))
+    if batch_key in _inflight:
+        return hit
+    _inflight.add(batch_key)
     try:
-        fetched = fetch_fn(list(dict.fromkeys(missing or symbols)))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("quote refresh failed (%d syms): %s", len(missing or symbols), e)
-        fetched = []
+        try:
+            fetched = fetch_fn(want)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("quote refresh failed (%d syms): %s", len(want), e)
+            fetched = []
+        got = {q.get("symbol") for q in fetched if q.get("symbol")}
+        for sym in want:
+            if sym not in got:
+                _missing_until[sym] = time.time() + _MISSING_TTL_S
+    finally:
+        _inflight.discard(batch_key)
 
     with _lock:
         if fetched:
