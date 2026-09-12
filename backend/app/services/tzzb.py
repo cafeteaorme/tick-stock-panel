@@ -63,6 +63,16 @@ def load_config() -> dict[str, Any]:
         return {"cookie": "", "endpoint": "", "user_name": "", "last_sync": None, "last_result": ""}
 
 
+def _harden_perms(path: Path) -> None:
+    """凭据文件限当前用户可读写 (0600)。"""
+    try:
+        import os
+
+        os.chmod(path, 0o600)
+    except OSError:  # noqa: BLE001
+        pass
+
+
 def save_config(**updates: Any) -> dict[str, Any]:
     with _CONFIG_LOCK:
         cfg = load_config()

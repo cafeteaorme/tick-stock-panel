@@ -35,6 +35,15 @@
 - **ESLint 落地**: 新增 flat config, `pnpm lint` 从"无配置空转"变为可用 (0 错误); 顺带修复 lint 抓到的真 bug——MiniIntraday 的 `useId` 在提前 return 之后条件调用
 - **小项**: theme-color 从紫色对齐 accent 蓝; 隐藏标签页停止 15s 轮询 (省电); 仓库内编译产物 (vite.config.js/.d.ts) 移出并进 gitignore; 高频 query key 收进 QK 常量
 
+## 0.1.88-0.51 (2026-09-13)
+
+### 四模型联合审查 · 第四批 (架构演进)
+
+- **Holdings 页面拆分**: 2,341 行单文件 → 主页面 835 行 + components/holdings/ 四模块 (charts 256 / dialogs 972 / panels 172 / shared 157), tsc + build 全过
+- **同账户投影缓存**: /holdings /summary 共享一次 enriched rows 读取 (3s TTL, 变更即失效), 消除同屏三端点重复 IO (summary 5ms)
+- **删除账户改回收站**: 账户数据移入 holdings/_trash/<id>_<ts>/, 自动保留最近 5 份, 误删可手工找回
+- **凭据存储收紧**: tzzb.json 写入后 chmod 600; 手动 Cookie 校验加强 (须含 v= 与 userid=), 防随意字符串被当成已配置
+- 注: query key 全面收编与 hooks 层抽取随下次功能迭代进行 (本次已完成组件层拆分)
 ## 0.1.88-0.50 (2026-09-13)
 
 ### 四模型联合审查 · 第三批修复 (前端正确性)

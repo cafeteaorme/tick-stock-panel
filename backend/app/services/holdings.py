@@ -203,7 +203,17 @@ def delete_account(account_id: str) -> dict[str, Any]:
     save_accounts(obj)
     d = _base_dir() / account_id
     if d.is_dir():
-        shutil.rmtree(d, ignore_errors=True)
+        # 回收站: 移入 _trash/<id>_<ts>/ 保留最近 5 份, 误删可手工找回
+        trash = _base_dir() / "_trash"
+        trash.mkdir(parents=True, exist_ok=True)
+        dst = trash / f"{account_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        try:
+            shutil.move(str(d), str(dst))
+        except Exception:  # noqa: BLE001
+            logger.warning("move to trash failed for %s", account_id, exc_info=True)
+        backups = sorted(trash.iterdir())
+        for old in backups[:-5]:
+            shutil.rmtree(old, ignore_errors=True)
     return obj
 
 

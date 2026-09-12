@@ -113,12 +113,36 @@ def _fin(v) -> float | None:
 
 _MKT_CACHE: dict[str, tuple[float, dict[str, dict]]] = {"t": 0.0, "rows": {}}
 _MKT_LOCK = threading.Lock()
+# 同账户 enriched rows 短 TTL 投影缓存: /holdings /summary /accounts 同屏三请求共享一次读取
+_ROWS_CACHE: dict[str, tuple[float, list]] = {}
+_ROWS_LOCK = threading.Lock()
+
+
+def _enriched_rows_cached(request: Request, acc: str, include_closed: bool = False) -> list:
+    key = f"{acc}:{include_closed}"
+    now = _time.monotonic()
+    with _ROWS_LOCK:
+        hit = _ROWS_CACHE.get(key)
+        if hit and now - hit[0] < 3.0:
+            return hit[1]
+    rates = _rates()
+    rows = holdings_service.list_all(acc, include_closed=include_closed)
+    symbols = [r["symbol"] for r in rows]
+    enriched = _enrich_rows(rows, rates, request.app.state.repo.get_name_map(symbols),
+                            _market_rows(request, symbols, rates))
+    with _ROWS_LOCK:
+        if len(_ROWS_CACHE) > 64:
+            _ROWS_CACHE.clear()
+        _ROWS_CACHE[key] = (now, enriched)
+    return enriched
 
 
 def _invalid_mkt_cache() -> None:
     with _MKT_LOCK:
         _MKT_CACHE["t"] = 0.0
         _MKT_CACHE["rows"] = {}
+    with _ROWS_LOCK:
+        _ROWS_CACHE.clear()
 
 
 def _market_rows(request: Request, symbols: list[str], rates: dict) -> dict[str, dict]:
@@ -343,16 +367,12 @@ def delete_account(account_id: str):
 @router.get("")
 def list_holdings(request: Request, include_closed: bool = Query(False), account: str | None = Query(None)):
     acc = _acc(request, account)
-    rows = holdings_service.list_all(acc, include_closed=include_closed)
-    open_rows = [r for r in rows if r.get("status") != "closed"]
-    repo = request.app.state.repo
-    rates = _rates()
-    symbols = [r["symbol"] for r in open_rows]
-    enriched = _enrich_rows(open_rows, rates, repo.get_name_map(symbols), _market_rows(request, symbols, rates))
+    enriched = _enriched_rows_cached(request, acc, include_closed=False)
     if include_closed:
         from app.services import tzzb
 
-        closed_raw = [r for r in rows if r.get("status") == "closed"]
+        rows_all = holdings_service.list_all(acc, include_closed=True)
+        closed_raw = [r for r in rows_all if r.get("status") == "closed"]
         nm = request.app.state.repo.get_name_map([r["symbol"] for r in closed_raw])
         acc_obj = holdings_service.list_accounts()
         acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), None)
@@ -375,11 +395,7 @@ def list_holdings(request: Request, include_closed: bool = Query(False), account
 @router.get("/summary")
 def summary(request: Request, account: str | None = Query(None)):
     acc = _acc(request, account)
-    rates = _rates()
-    rows = holdings_service.list_all(acc)
-    symbols = [r["symbol"] for r in rows]
-    enriched = _enrich_rows(rows, rates, request.app.state.repo.get_name_map(symbols),
-                            _market_rows(request, symbols, rates))
+    enriched = _enriched_rows_cached(request, acc, include_closed=False)
     portfolio = holdings_service.get_portfolio(acc)
 
     total_value = sum(r["market_value"] or 0 for r in enriched)
@@ -555,8 +571,9 @@ def tzzb_set_cookie(req: dict):
     cookie = str(req.get("cookie") or "").strip()
     if not cookie:
         raise HTTPException(400, "Cookie 不能为空")
-    if "v=" not in cookie and "hexin" not in cookie.lower() and "=" not in cookie:
-        raise HTTPException(400, "Cookie 格式不像登录凭据, 请复制浏览器里完整的 Cookie")
+    # 校验加强: 需含 v= (反爬令牌) 与 userid= (账户标识) 且长度足够, 防随意字符串被当成已配置
+    if not ("v=" in cookie and "userid=" in cookie and len(cookie) > 60):
+        raise HTTPException(400, "Cookie 缺少 v= 或 userid= 字段 — 请在账本页 F12 → Network → 任意请求复制完整 Cookie")
     cfg = tzzb.save_config(cookie=cookie)
     return {"ok": True, "cookie_set": bool(cfg.get("cookie"))}
 
