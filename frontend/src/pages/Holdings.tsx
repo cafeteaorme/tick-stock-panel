@@ -11,6 +11,7 @@ import { BgTasksPanel, AiReportPanel, type TzzbJob } from '@/components/holdings
 import { fmtMoney, fmtPct, pnlColor, REGION_BADGE, todayIso, LoadingSkeleton, ErrorBanner } from '@/components/holdings/shared'
 
 type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_value' | 'float_pnl' | 'day_pnl'
+  | 'first_buy' | 'buy_avg'
   | 'pre_profit' | 'hold_days' | 'm1_rate' | 'm3_rate' | 'm6_rate' | 'm12_rate' | 'position_rate'
 
 export function Holdings() {
@@ -131,6 +132,12 @@ export function Holdings() {
     queryKey: QK.holdingsTzzbClearedCheck(activeAcc),
     queryFn: () => api.holdingsTzzbClearedCheck(activeAcc || undefined),
   })
+  // 月度胜率 (清仓轮次派生)
+  const monthlyStats = useQuery({
+    queryKey: ['holdings-tzzb-monthly-stats'],
+    queryFn: api.holdingsMonthlyStats,
+    staleTime: 5 * 60_000,
+  })
   const [showTasks, setShowTasks] = useState(false)
 
   const rows = useMemo(() => {
@@ -152,6 +159,8 @@ export function Holdings() {
         case 'm6_rate': return r.m6_rate ?? -Infinity
         case 'm12_rate': return r.m12_rate ?? -Infinity
         case 'position_rate': return r.position_rate ?? -Infinity
+        case 'first_buy': return r.first_buy ?? ''
+        case 'buy_avg': return r.buy_avg ?? -Infinity
       }
     }
     list.sort((a, b) => {
@@ -197,6 +206,8 @@ export function Holdings() {
     { key: 'm6_rate', label: '近6月' },
     { key: 'm12_rate', label: '近12月' },
     { key: 'position_rate', label: '占比' },
+    { key: 'first_buy', label: '首买日期' },
+    { key: 'buy_avg', label: '买入均价' },
   ]
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
@@ -279,6 +290,8 @@ export function Holdings() {
       case 'm6_rate': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m6_rate)}`}>{fmtPct(r.m6_rate)}</td>
       case 'm12_rate': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.m12_rate)}`}>{fmtPct(r.m12_rate)}</td>
       case 'position_rate': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.position_rate != null ? `${(r.position_rate * 100).toFixed(1)}%` : '—'}</td>
+      case 'first_buy': return <td className="px-3 py-2.5 tabular-nums text-muted text-xs">{r.first_buy ?? '—'}</td>
+      case 'buy_avg': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.buy_avg != null ? r.buy_avg.toFixed(3) : '—'}</td>
     }
   }
 
@@ -314,7 +327,10 @@ export function Holdings() {
       // 同步成功后链式更新真实成交缓存 (B/S 点 + 清仓核对数据源)
       if (j.key === 'sync' && j.ok) {
         api.holdingsTzzbTradesRefresh()
-          .then(() => qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() }))
+          .then(() => {
+            qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() })
+            qc.invalidateQueries({ queryKey: ['holdings-tzzb-monthly-stats'] })
+          })
           .catch(() => {})
       }
       if (j.ok) toast(`${j.label || j.key}完成：${j.message || ''}`, 'success')
@@ -649,7 +665,7 @@ export function Holdings() {
                 <table className="w-full text-[13px]">
                   <thead>
                     <tr className="text-muted border-b border-border/60 bg-elevated/30">
-                      {(['名称/代码', '成本', '已实现盈亏', '清仓时间', '资金到账'] as const).map((h, i) => (
+                      {(['名称/代码', '成本', '卖出均价', '已实现盈亏', '清仓时间', '资金到账'] as const).map((h, i) => (
                         <th key={h} onClick={() => setClosedSort(cs => ({ col: i, dir: cs.col === i && cs.dir === 'asc' ? 'desc' : 'asc' }))}
                           className="px-3 py-2 text-left font-medium cursor-pointer select-none hover:text-foreground">
                           {h}{closedSort.col === i && <span className="ml-0.5 text-accent">{closedSort.dir === 'asc' ? '↑' : '↓'}</span>}
@@ -659,7 +675,7 @@ export function Holdings() {
                   </thead>
                   <tbody>
                     {[...closedRows].sort((a, b) => {
-                      const keys: (keyof HoldingRow)[] = ['symbol', 'avg_cost', 'realized_pnl', 'closed_at', 'settle_date']
+                      const keys: (keyof HoldingRow)[] = ['symbol', 'avg_cost', 'avg_sell', 'realized_pnl', 'closed_at', 'settle_date']
                       const k = keys[closedSort.col]
                       const va = (a[k] ?? 0) as string | number
                       const vb = (b[k] ?? 0) as string | number
@@ -679,6 +695,7 @@ export function Holdings() {
                           </div>
                         </td>
                         <td className="px-3 py-2 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
+                        <td className="px-3 py-2 tabular-nums text-secondary" title="账本成交派生的真实卖出均价">{r.avg_sell?.toFixed(3) ?? '—'}</td>
                         <td className={`px-3 py-2 tabular-nums font-medium ${pnlColor(r.realized_pnl)}`}>{fmtMoney(r.realized_pnl)}</td>
                         <td className="px-3 py-2 tabular-nums text-muted text-xs">{r.closed_at?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
                         <td className="px-3 py-2 tabular-nums text-xs">
@@ -762,7 +779,7 @@ export function Holdings() {
               <span className="text-[11px] text-muted">{useLedgerMonthly ? '账本 · 全部账户' : `本账户${activeAccName ? ` · ${activeAccName}` : ''}`}</span>
             </div>
           </div>
-          <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} />
+          <MonthlyBars monthly={(historyData.data?.cached && historyData.data.monthly?.length ? historyData.data.monthly : pnl.data?.monthly) ?? []} stats={monthlyStats.data?.stats} />
         </div>
 
         {/* 年收益: 全宽 */}

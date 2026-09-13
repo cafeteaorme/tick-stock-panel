@@ -350,6 +350,9 @@ export interface HoldingRow {
   closed_at?: string | null
   sell_date?: string | null
   settle_date?: string | null
+  first_buy?: string | null
+  buy_avg?: number | null
+  avg_sell?: number | null
   realized_pnl?: number | null
   price?: number | null
   change_pct?: number | null
@@ -1620,6 +1623,8 @@ export const api = {
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbHistoryData: () =>
     request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[] }>('/api/holdings/tzzb/history-data'),
+  holdingsMonthlyStats: () =>
+    request<{ stats: { period: string; wins: number; losses: number; win_rate?: number | null; realized: number }[] }>('/api/holdings/tzzb/monthly-stats'),
   holdingsTzzbHkRate: () =>
     request<{ rate: number; before: number }>('/api/holdings/tzzb/hk-rate'),
   holdingsTzzbHistoryStatus: () =>

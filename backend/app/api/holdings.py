@@ -366,19 +366,31 @@ def delete_account(account_id: str):
 
 @router.get("")
 def list_holdings(request: Request, include_closed: bool = Query(False), account: str | None = Query(None)):
+    from app.services import tzzb
+
     acc = _acc(request, account)
     enriched = _enriched_rows_cached(request, acc, include_closed=False)
+    acc_obj = holdings_service.list_accounts()
+    acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), None)
+    # 当前轮真实首买日期/买入均价 (成交重放)
+    round_stats = tzzb.round_stats_for(acc_name, [r["symbol"] for r in enriched])
+    enriched = [{**r, **(round_stats.get(r["symbol"]) or {})} for r in enriched]
     if include_closed:
-        from app.services import tzzb
-
         rows_all = holdings_service.list_all(acc, include_closed=True)
         closed_raw = [r for r in rows_all if r.get("status") == "closed"]
         nm = request.app.state.repo.get_name_map([r["symbol"] for r in closed_raw])
-        acc_obj = holdings_service.list_accounts()
-        acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), None)
+        tc = tzzb.load_trades_cache()
+        ledger_map = {c["symbol"]: c for c in (tc.get("cleared") or [])
+                      if acc_name and c.get("account_name") == acc_name}
         closed_out = []
         for r in closed_raw:
             r = {**r, "name": nm.get(r["symbol"])}
+            # 账本轮次回填真实卖出均价 (成交派生, 优于同步时的近似价)
+            rnd = ledger_map.get(r["symbol"])
+            if rnd:
+                r["avg_sell"] = rnd.get("avg_sell")
+                if not r.get("realized_pnl") and rnd.get("profit") is not None:
+                    r["realized_pnl"] = rnd["profit"]
             # 港股通卖出资金 T+2 交易日交收 (先冻结后划付): 从卖出日向后推算到账日
             if r["symbol"].endswith(".HK"):
                 sell_d = (r.get("closed_at") or "")[:10]
@@ -1009,6 +1021,14 @@ def tzzb_trades(symbol: str | None = Query(None)):
     if symbol:
         out["trades"] = [t for t in (obj.get("trades") or []) if t.get("symbol") == symbol]
     return out
+
+
+@router.get("/tzzb/monthly-stats")
+def tzzb_monthly_stats():
+    """月度胜率统计 (清仓轮次派生: 胜/负轮数、胜率、当月已实现)。"""
+    from app.services import tzzb
+
+    return {"stats": tzzb.monthly_stats()}
 
 
 @router.post("/tzzb/trades/refresh")

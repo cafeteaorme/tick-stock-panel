@@ -930,11 +930,75 @@ def _derive_cleared(trades: list[dict]) -> list[dict]:
     return rounds
 
 
+_TRADES_MEM: dict[str, tuple[float, dict]] = {}
+
+
 def load_trades_cache() -> dict:
+    """成交缓存读取 (进程内按 mtime 失效, 多端点复用免重复 IO)。"""
     try:
-        return json.loads(_trades_path().read_text("utf-8"))
+        p = _trades_path()
+        mt = p.stat().st_mtime
+        hit = _TRADES_MEM.get("obj")
+        if hit and hit[0] == mt:
+            return hit[1]
+        obj = json.loads(p.read_text("utf-8"))
+        _TRADES_MEM["obj"] = (mt, obj)
+        return obj
     except Exception:  # noqa: BLE001
         return {}
+
+
+def round_stats_for(account_name: str | None, symbols: list[str]) -> dict[str, dict]:
+    """从成交缓存重放各 symbol 当前持仓轮: 首买日期 + 当前轮买入均价。"""
+    obj = load_trades_cache()
+    by_key: dict[tuple[str, str], list[dict]] = {}
+    for t in obj.get("trades") or []:
+        if symbols and t.get("symbol") in symbols:
+            by_key.setdefault((t.get("account_name") or "", t.get("symbol") or ""), []).append(t)
+    out: dict[str, dict] = {}
+    for (acc, sym), ts in by_key.items():
+        if account_name and acc != account_name:
+            continue
+        qty = cost = 0.0
+        first_buy: str | None = None
+        for t in sorted(ts, key=lambda x: (x["date"], x.get("time") or "")):
+            q = float(t.get("qty") or 0)
+            if t.get("bs") == "B":
+                if qty <= 1e-9:
+                    first_buy = t["date"]
+                    cost = 0.0
+                qty += q
+                cost += float(t.get("price") or 0) * q
+            elif t.get("bs") == "S":
+                qty -= q
+                if abs(qty) < 1e-6:
+                    qty = cost = 0.0
+                    first_buy = None
+        if qty > 1e-9 and first_buy:
+            out[sym] = {"first_buy": first_buy, "buy_avg": round(cost / qty, 4)}
+    return out
+
+
+def monthly_stats() -> list[dict]:
+    """按清仓轮次聚合月度胜率 (真实成交派生, 优于空值的账本 win_rate 接口)。"""
+    obj = load_trades_cache()
+    acc: dict[str, dict] = {}
+    for c in obj.get("cleared") or []:
+        m = (c.get("last_sell") or "")[:7]
+        if not m:
+            continue
+        cur = acc.setdefault(m, {"wins": 0, "losses": 0, "realized": 0.0})
+        p = float(c.get("profit") or 0)
+        if p >= 0:
+            cur["wins"] += 1
+        else:
+            cur["losses"] += 1
+        cur["realized"] += p
+    return [{
+        "period": m, "wins": v["wins"], "losses": v["losses"],
+        "win_rate": round(v["wins"] / (v["wins"] + v["losses"]), 4) if (v["wins"] + v["losses"]) else None,
+        "realized": round(v["realized"], 2),
+    } for m, v in sorted(acc.items())]
 
 
 def trades_status() -> dict:
@@ -1002,6 +1066,7 @@ def fetch_trades_cache() -> dict[str, Any]:
         "accounts": per_acc,
         "trades": trades,
         "cleared": cleared,
+        "monthly_stats": monthly_stats(),
         "bank": bank,
     }
     _atomic_write_json(_trades_path(), payload)

@@ -168,20 +168,41 @@ export function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: s
  * ================================================================ */
 
 
-export function MonthlyBars({ monthly }: { monthly: { period: string; pnl: number }[] }) {
+export function MonthlyBars({ monthly, stats }: { monthly: { period: string; pnl: number }[]; stats?: { period: string; wins: number; losses: number; win_rate?: number | null; realized: number }[] }) {
+  const statMap = useMemo(() => new Map((stats ?? []).map(x => [x.period, x])), [stats])
   const option = useMemo(() => ({
     animation: false,
     grid: { left: 60, right: 20, top: 26, bottom: 28 },
-    tooltip: { trigger: 'axis', valueFormatter: (v: number) => fmtMoney(v), ...TOOLTIP_STYLE },
+    tooltip: {
+      trigger: 'axis', ...TOOLTIP_STYLE,
+      formatter: (ps: any[]) => {
+        const p = ps[0]
+        const st = statMap.get(monthly[p.dataIndex]?.period)
+        const rows = [`${p.marker}${p.axisValue}: <b>${fmtMoney(p.value)}</b>`]
+        if (st) rows.push(`胜率 <b>${st.win_rate != null ? (st.win_rate * 100).toFixed(0) + '%' : '—'}</b> (${st.wins}胜${st.losses}负)`, `已实现 ${fmtMoney(st.realized)}`)
+        return rows.join('<br/>')
+      },
+    },
     xAxis: { type: 'category', data: monthly.map(r => `${Number(r.period.slice(5))}月`), axisLabel: { fontSize: 10 } },
     yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => fmtMoney(v, 0) }, splitLine: { lineStyle: { color: 'rgba(128,128,140,0.15)' } } },
     series: [{
       type: 'bar', barMaxWidth: 28,
-      data: monthly.map(r => ({
-        value: r.pnl,
-        itemStyle: { color: r.pnl >= 0 ? '#ef4444' : '#22c55e', borderRadius: [3, 3, 0, 0] },
-      })),
-      label: { show: true, position: 'top', fontSize: 9, color: '#a1a1aa', formatter: (p: any) => (Math.abs(p.value) >= 100 ? fmtMoney(p.value, 0) : '') },
+      data: monthly.map(r => {
+        const st = statMap.get(r.period)
+        return {
+          value: r.pnl,
+          itemStyle: { color: r.pnl >= 0 ? '#ef4444' : '#22c55e', borderRadius: [3, 3, 0, 0] },
+          label: {
+            show: true, position: 'top', fontSize: 9, color: '#a1a1aa',
+            formatter: () => {
+              const parts: string[] = []
+              if (Math.abs(r.pnl) >= 100) parts.push(fmtMoney(r.pnl, 0))
+              if (st?.win_rate != null) parts.push(`胜${(st.win_rate * 100).toFixed(0)}%`)
+              return parts.join(' · ')
+            },
+          },
+        }
+      }),
     }],
   }), [monthly])
   return <EChart option={option} height={200} />
