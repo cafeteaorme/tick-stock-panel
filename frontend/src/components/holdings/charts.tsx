@@ -15,7 +15,7 @@ export function SummaryCard({ s, onSetCap }: {
   }
   return (
     <div className="rounded-card border border-border bg-gradient-to-br from-surface via-surface to-elevated/50 p-5 md:p-6 shadow-sm">
-      <div className="grid grid-cols-2 gap-6 items-end">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 items-end">
         <div>
           <div className="text-xs text-muted flex items-center gap-2">
             总资产
@@ -59,7 +59,7 @@ export function SummaryCard({ s, onSetCap }: {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 mt-5">
         <div>
           <div className="text-xs text-muted">账本总盈亏（浮+已实现）</div>
           <div className={`text-lg font-bold tabular-nums mt-1 ${pnlColor(s.total_pnl)}`}>{fmtMoney(s.total_pnl)}</div>

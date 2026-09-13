@@ -1623,6 +1623,10 @@ export const api = {
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbHistoryData: () =>
     request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[] }>('/api/holdings/tzzb/history-data'),
+  holdingsTargets: (account?: string) =>
+    request<{ targets: Record<string, { tp?: number; sl?: number }> }>(`/api/holdings/targets${account ? `?account=${encodeURIComponent(account)}` : ''}`),
+  holdingsSetTarget: (symbol: string, tp: number | null, sl: number | null, account?: string) =>
+    request<{ ok: boolean }>(`/api/holdings/targets/${encodeURIComponent(symbol)}?account=${encodeURIComponent(account || '')}`, { method: 'POST', body: JSON.stringify({ tp, sl }) }),
   holdingsSparklines: (account?: string) =>
     request<{ sparklines: Record<string, number[]> }>(`/api/holdings/sparklines${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsMonthlyStats: () =>

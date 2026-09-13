@@ -145,6 +145,29 @@ export function Holdings() {
     staleTime: 60_000,
   })
   const sparkMap = useMemo(() => new Map(Object.entries(sparkQ.data?.sparklines ?? {})), [sparkQ.data])
+  // 止盈止损: 目标价查询 + 现价穿越检测 (每 symbol 每日最多提示一次)
+  const targetsQ = useQuery({
+    queryKey: ['holdings-targets', activeAcc],
+    queryFn: () => api.holdingsTargets(activeAcc || undefined),
+    staleTime: 60_000,
+  })
+  const targets = targetsQ.data?.targets ?? {}
+  useEffect(() => {
+    if (!targetsQ.data) return
+    const today = new Date().toISOString().slice(0, 10)
+    for (const r of holdings.data?.rows ?? []) {
+      const tg = targets[r.symbol]
+      const price = r.price
+      if (!tg || price == null) continue
+      const hitTp = tg.tp != null && price >= tg.tp
+      const hitSl = tg.sl != null && price <= tg.sl
+      if (!hitTp && !hitSl) continue
+      const key = `tf-target-alerted-${r.symbol}-${today}`
+      if (localStorage.getItem(key)) continue
+      localStorage.setItem(key, '1')
+      toast(`${r.name || r.symbol} ${hitTp ? '已达止盈价' : '已破止损价'} ${hitTp ? tg.tp : tg.sl} (现价 ${price})`, hitTp ? 'success' : 'error')
+    }
+  }, [holdings.data, targetsQ.data])
   const [showTasks, setShowTasks] = useState(false)
 
   const rows = useMemo(() => {
@@ -245,6 +268,16 @@ export function Holdings() {
     saveOrder(next)
   }
   const visibleCols = useMemo(() => colOrder.filter(k => !hiddenCols.has(k)), [colOrder, hiddenCols])
+  // 快速筛选: 市场 / 盈亏方向
+  const [filter, setFilter] = useState<'all' | 'CN' | 'HK' | 'US' | 'win' | 'lose'>('all')
+  const filteredRows = useMemo(() => {
+    if (filter === 'all') return rows
+    return rows.filter(r => {
+      if (filter === 'win') return (r.float_pnl ?? 0) > 0
+      if (filter === 'lose') return (r.float_pnl ?? 0) < 0
+      return (r.region ?? 'CN') === filter
+    })
+  }, [rows, filter])
   const [presets, setPresets] = useState<Record<string, { hidden: string[]; order: SortKey[] }>>(() => {
     try { return JSON.parse(localStorage.getItem('tf-holdings-col-presets') || '{}') } catch { return {} }
   })
@@ -519,10 +552,18 @@ export function Holdings() {
         })()}
         {/* 持仓明细 (可排序 + 点击查看) */}
         <div className="rounded-card border border-border bg-surface overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center gap-2 relative">
+          <div className="px-4 py-3 border-b border-border flex items-center gap-2 relative flex-wrap">
             <TrendingUp className="h-4 w-4 text-accent" />
             <span className="text-sm font-semibold text-foreground">持仓明细</span>
-            <span className="text-[10px] text-muted">点列名排序 · 点行查看个股</span>
+            <span className="text-[10px] text-muted hidden md:inline">点列名排序 · 点行查看个股</span>
+            <div className="flex items-center gap-1">
+              {([['all', '全部'], ['CN', 'A股'], ['HK', '港股'], ['US', '美股'], ['win', '盈利'], ['lose', '亏损']] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setFilter(k)}
+                  className={`px-2 py-0.5 rounded-full text-[11px] transition-colors ${filter === k ? 'bg-accent/20 text-accent font-medium' : 'text-muted hover:text-secondary hover:bg-elevated'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <button
               onClick={() => { setShowAi(true); setAiKey(k => k + 1) }}
               className="ml-2 inline-flex items-center gap-1 px-2 py-1 rounded-btn border border-violet-500/40 bg-violet-500/10 text-violet-400 text-[11px] font-medium hover:bg-violet-500/20"
@@ -580,6 +621,10 @@ export function Holdings() {
               onClick={() => window.open(`/api/holdings/export/holdings.csv${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')}
               className="text-[11px] text-accent hover:underline"
             >导出 CSV</button>
+            <button
+              onClick={() => window.open(`/api/holdings/export/holdings.xlsx${activeAcc ? `?account=${encodeURIComponent(activeAcc)}` : ''}`, '_blank')}
+              className="text-[11px] text-accent hover:underline"
+            >导出 Excel</button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-[13px]" style={{ minWidth: Math.max(visibleCols.length, 6) * 92 }}>
@@ -604,10 +649,14 @@ export function Holdings() {
                     <Loader2 className="h-4 w-4 animate-spin inline mr-2" />持仓数据加载中…
                   </td></tr>
                 )}
-                {rows.map(r => {
+                {filteredRows.map(r => {
                   const concentrated = (r.position_rate ?? 0) > 0.4
+                  const tg = targets[r.symbol]
+                  const hitTp = tg?.tp != null && r.price != null && r.price >= tg.tp
+                  const hitSl = tg?.sl != null && r.price != null && r.price <= tg.sl
                   return (
-                    <tr key={r.symbol} className={`border-b border-border/40 hover:bg-elevated/30 transition-colors cursor-pointer ${concentrated ? 'bg-amber-400/[0.07]' : ''}`}
+                    <tr key={r.symbol} className={`border-b border-border/40 hover:bg-elevated/30 transition-colors cursor-pointer ${concentrated ? 'bg-amber-400/[0.07]' : ''} ${hitTp ? 'ring-1 ring-inset ring-[#ef4444]/40' : ''} ${hitSl ? 'ring-1 ring-inset ring-[#22c55e]/40' : ''}`}
+                      title={hitTp || hitSl ? `现价${hitTp ? '≥止盈' : '≤止损'} ${hitTp ? tg.tp : tg.sl}` : undefined}
                       onClick={() => openPreview(r.symbol, r.name || '')}>
                       {visibleCols.map(k => <Fragment key={k}>{renderCell(k, r)}</Fragment>)}
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>

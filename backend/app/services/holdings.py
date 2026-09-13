@@ -490,6 +490,26 @@ def save_snapshot(account_id: str, date_iso: str, rows: list[dict] | None = None
     return obj
 
 
+def get_targets(account_id: str) -> dict[str, dict]:
+    """止盈/止损目标价 ({symbol: {tp, sl}})。"""
+    p = _acc_dir(account_id) / "targets.json"
+    try:
+        return json.loads(p.read_text("utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def set_target(account_id: str, symbol: str, tp: float | None, sl: float | None) -> dict[str, dict]:
+    targets = get_targets(account_id)
+    if tp is None and sl is None:
+        targets.pop(symbol, None)
+    else:
+        cur = targets.get(symbol, {})
+        targets[symbol] = {"tp": tp if tp else cur.get("tp"), "sl": sl if sl else cur.get("sl")}
+    _atomic_write(_acc_dir(account_id) / "targets.json", json.dumps(targets, ensure_ascii=False))
+    return targets
+
+
 def list_snapshots(account_id: str) -> list[dict]:
     out = []
     for f in sorted(_snap_dir(account_id).glob("*.json")):

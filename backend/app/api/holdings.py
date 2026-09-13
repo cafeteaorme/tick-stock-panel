@@ -655,6 +655,86 @@ def delete_report(report_id: str):
     return tzzb.delete_report(report_id)
 
 
+class TargetRequest(BaseModel):
+    tp: float | None = None
+    sl: float | None = None
+
+
+@router.get("/targets")
+def get_targets(request: Request, account: str | None = Query(None)):
+    acc = _acc(request, account)
+    return {"targets": holdings_service.get_targets(acc)}
+
+
+@router.post("/targets/{symbol}")
+def set_target(symbol: str, req: TargetRequest, request: Request, account: str | None = Query(None)):
+    acc = _acc(request, account)
+    targets = holdings_service.set_target(acc, symbol, req.tp, req.sl)
+    return {"ok": True, "targets": targets}
+
+
+@router.get("/export/holdings.xlsx")
+def export_holdings_xlsx(request: Request, account: str | None = Query(None)):
+    """三合一 Excel 导出: 持仓 / 已清仓 / 月度收益 (UTF-8, Excel 直开)。"""
+    import io
+
+    from openpyxl import Workbook
+    from app.config import settings
+
+    acc = _acc(request, account)
+    acc_obj = holdings_service.list_accounts()
+    acc_name = next((a["name"] for a in acc_obj["accounts"] if a["id"] == acc), acc)
+    wb = Workbook()
+
+    ws = wb.active
+    ws.title = "持仓"
+    ws.append(["代码", "名称", "市场", "现价", "涨跌幅%", "持仓", "可用", "成本", "市值", "浮动盈亏", "浮动盈亏%", "当日盈亏", "首买日期", "买入均价", "止盈价", "止损价"])
+    rows = _enriched_rows_cached(request, acc, include_closed=False)
+    targets = holdings_service.get_targets(acc)
+    for r in rows:
+        tg = targets.get(r["symbol"]) or {}
+        ws.append([r["symbol"], r.get("name") or "", r.get("region") or "", r.get("price"), (r.get("change_pct") or 0) * 100,
+                   r.get("qty"), r.get("available"), r.get("avg_cost"), r.get("market_value"), r.get("float_pnl"),
+                   (r.get("float_pnl_pct") or 0) * 100, r.get("day_pnl"), r.get("first_buy") or "", r.get("buy_avg"),
+                   tg.get("tp"), tg.get("sl")])
+
+    from app.services import tzzb
+
+    ws2 = wb.create_sheet("已清仓")
+    ws2.append(["代码", "名称", "成本", "卖出均价", "已实现盈亏", "清仓时间", "资金到账"])
+    tc = tzzb.load_trades_cache()
+    ledger_map = {c["symbol"]: c for c in (tc.get("cleared") or []) if c.get("account_name") == acc_name}
+    for r in holdings_service.list_all(acc, include_closed=True):
+        if r.get("status") != "closed":
+            continue
+        rnd = ledger_map.get(r["symbol"])
+        ws2.append([r["symbol"], r.get("name") or "", r.get("avg_cost"), (rnd or {}).get("avg_sell"),
+                    r.get("realized_pnl"), r.get("closed_at"), (rnd or {}).get("last_sell")])
+
+    ws3 = wb.create_sheet("月度收益")
+    ws3.append(["月份", "收益", "胜率", "胜/负轮数", "已实现"])
+    for st in tzzb.monthly_stats():
+        ws3.append([st["period"], None, st["win_rate"], f"{st['wins']}胜{st['losses']}负", st["realized"]])
+    hist_p = settings.data_dir / "user_data" / "tzzb_history.json"
+    if hist_p.exists():
+        try:
+            hist = json.loads(hist_p.read_text("utf-8"))
+            monthly = {m["period"]: m["pnl"] for m in hist.get("monthly") or []}
+            for row in ws3.iter_rows(min_row=2):
+                if row[0].value in monthly:
+                    row[1].value = monthly[row[0].value]
+        except Exception:  # noqa: BLE001
+            pass
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    from fastapi.responses import Response
+
+    return Response(content=buf.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename=holdings_{acc_name}.xlsx"})
+
+
 @router.get("/export/holdings.csv")
 def export_holdings_csv(request: Request, account: str | None = Query(None)):
     """持仓明细导出 CSV (UTF-8 BOM, Excel 兼容)。"""

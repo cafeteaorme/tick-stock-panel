@@ -11,6 +11,17 @@ import { fmtMoney, fmtPct, pnlColor, todayIso, refreshHoldingsCaches, type ShotS
 
 export function EditDialog({ row, onClose, account }: { row: HoldingRow; onClose: () => void; account?: string }) {
   const qc = useQueryClient()
+  const targetsQ = useQuery({
+    queryKey: ['holdings-targets', account],
+    queryFn: () => api.holdingsTargets(account || undefined),
+    enabled: !!account,
+  })
+  const curTarget = targetsQ.data?.targets?.[row.symbol]
+  const [tp, setTp] = useState<string>('')
+  const [sl, setSl] = useState<string>('')
+  useEffect(() => {
+    if (curTarget) { setTp(curTarget.tp != null ? String(curTarget.tp) : ''); setSl(curTarget.sl != null ? String(curTarget.sl) : '') }
+  }, [curTarget])
   const [qty, setQty] = useState(String(row.qty))
   const [available, setAvailable] = useState(row.available != null ? String(row.available) : '')
   const [cost, setCost] = useState(row.avg_cost != null ? String(row.avg_cost) : '')
@@ -105,6 +116,29 @@ export function EditDialog({ row, onClose, account }: { row: HoldingRow; onClose
               <input type="number" step="any" min="0" value={sellQty} onChange={e => setSellQty(e.target.value)}
                 className="w-40 h-8 px-2.5 rounded-btn bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
             </label>
+            <div className="border-t border-border/60 pt-2.5 space-y-2">
+              <div className="text-[11px] text-muted">止盈 / 止损提醒 (现价穿越时持仓页提示)</div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center justify-between gap-2 text-xs flex-1">
+                  <span className="text-secondary">止盈价</span>
+                  <input type="number" step="any" min="0" value={tp} onChange={e => setTp(e.target.value)} placeholder="未设置"
+                    className="w-24 h-8 px-2 rounded-btn bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-xs flex-1">
+                  <span className="text-secondary">止损价</span>
+                  <input type="number" step="any" min="0" value={sl} onChange={e => setSl(e.target.value)} placeholder="未设置"
+                    className="w-24 h-8 px-2 rounded-btn bg-base border border-border text-right tabular-nums text-foreground focus:outline-none focus:border-accent/50" />
+                </label>
+                <button
+                  onClick={() => {
+                    api.holdingsSetTarget(row.symbol, Number(tp) || null, Number(sl) || null, account || undefined)
+                      .then(() => { qc.invalidateQueries({ queryKey: ['holdings-targets'] }); toast('止盈止损已保存', 'success') })
+                      .catch(() => toast('保存失败', 'error'))
+                  }}
+                  className="h-8 px-3 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground"
+                >保存</button>
+              </div>
+            </div>
             {row.avg_cost != null && Number(sellPrice) && (
               <div className="text-[11px] text-muted tabular-nums">
                 预计盈亏：<span className={pnlColor((Number(sellPrice) - row.avg_cost) * (Number(sellQty) || row.qty))}>
