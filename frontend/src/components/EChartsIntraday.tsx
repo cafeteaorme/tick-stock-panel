@@ -1,6 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import * as echarts from 'echarts'
-import type { ECharts, EChartsOption } from 'echarts'
+import * as echarts from 'echarts/core'
+import {
+  LineChart, BarChart, CandlestickChart, ScatterChart, PieChart,
+} from 'echarts/charts'
+import {
+  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent,
+  MarkPointComponent, MarkLineComponent, GraphicComponent, AxisPointerComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([
+  LineChart, BarChart, CandlestickChart, ScatterChart, PieChart,
+  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent,
+  MarkPointComponent, MarkLineComponent, GraphicComponent, AxisPointerComponent,
+  CanvasRenderer,
+])
+
+import type { EChartsOption } from 'echarts'
+import type { EChartsInst } from '@/lib/echarts'
 import type { MinuteKlineRow, PriceLimitInfo } from '@/lib/api'
 import { BULL, BEAR, useChartTheme, type ChartTheme } from '@/lib/theme'
 
@@ -459,7 +476,7 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
 
 export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimit, onPriceHover, showLimitLines = true, showAvgLine = true, region = 'CN', bsMarkers }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<ECharts | null>(null)
+  const chartRef = useRef<EChartsInst | null>(null)
   const roRef = useRef<ResizeObserver | null>(null)
   const moRef = useRef<MutationObserver | null>(null)
   const dataRef = useRef(data)

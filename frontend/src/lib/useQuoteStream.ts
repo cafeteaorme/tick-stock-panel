@@ -164,7 +164,7 @@ export function useQuoteStream(
         if (!pages || pages['holdings'] !== false) {
           qc.invalidateQueries({ queryKey: ['holdings'] })
           qc.invalidateQueries({ queryKey: ['holdings-summary'] })
-          qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+          qc.invalidateQueries({ queryKey: QK.holdingsAccounts })
         }
       })
 

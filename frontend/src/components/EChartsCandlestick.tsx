@@ -1,7 +1,24 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { BULL, BEAR, chartTheme, getTheme, useTheme, withAlpha } from '@/lib/theme'
-import * as echarts from 'echarts'
-import type { ECharts, EChartsOption } from 'echarts'
+import * as echarts from 'echarts/core'
+import {
+  LineChart, BarChart, CandlestickChart, ScatterChart, PieChart,
+} from 'echarts/charts'
+import {
+  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent,
+  MarkPointComponent, MarkLineComponent, GraphicComponent, AxisPointerComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+echarts.use([
+  LineChart, BarChart, CandlestickChart, ScatterChart, PieChart,
+  GridComponent, TooltipComponent, LegendComponent, DataZoomComponent,
+  MarkPointComponent, MarkLineComponent, GraphicComponent, AxisPointerComponent,
+  CanvasRenderer,
+])
+
+import type { EChartsOption } from 'echarts'
+import type { EChartsInst } from '@/lib/echarts'
 
 export interface OHLC {
   date: string
@@ -803,7 +820,7 @@ export function EChartsCandlestick({
   volumeCompare = { enabled: true, days: 1 },
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<ECharts | null>(null)
+  const chartRef = useRef<EChartsInst | null>(null)
   const dataRef = useRef(data)
   dataRef.current = data
   const onDateClickRef = useRef(onDateClick)

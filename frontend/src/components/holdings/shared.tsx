@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type { ECharts } from 'echarts'
 import { QK } from '@/lib/queryKeys'
+import type { EChartsInst } from '@/lib/echarts'
 
 export interface ShotSummary {
   total_asset?: number | null
@@ -102,15 +102,15 @@ export const TOOLTIP_STYLE = {
 
 export function EChart({ option, height }: { option: any; height: number }) {
   const ref = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<ECharts | null>(null)
+  const chartRef = useRef<EChartsInst | null>(null)
   const optionRef = useRef(option)
   optionRef.current = option
   // 挂载: 动态 import 后 init 一次; 数据变化只 setOption (避免 SSE 高频下 dispose/重建)
   useEffect(() => {
     let cancelled = false
-    import('echarts').then(echarts => {
+    import('@/lib/echarts').then(({ echarts }) => {
       if (cancelled || !ref.current) return
-      if (!chartRef.current) chartRef.current = echarts.init(ref.current)
+      if (!chartRef.current) chartRef.current = echarts.init(ref.current!)
       chartRef.current.setOption(optionRef.current, true)
     })
     const onResize = () => chartRef.current?.resize()

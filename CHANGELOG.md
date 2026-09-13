@@ -35,6 +35,14 @@
 - **ESLint 落地**: 新增 flat config, `pnpm lint` 从"无配置空转"变为可用 (0 错误); 顺带修复 lint 抓到的真 bug——MiniIntraday 的 `useId` 在提前 return 之后条件调用
 - **小项**: theme-color 从紫色对齐 accent 蓝; 隐藏标签页停止 15s 轮询 (省电); 仓库内编译产物 (vite.config.js/.d.ts) 移出并进 gitignore; 高频 query key 收进 QK 常量
 
+## 0.1.88-0.55 (2026-09-13)
+
+### 深度迭代 · 技术收尾包
+
+- **ECharts 按需导入**: 新增 lib/echarts.ts 统一注册入口 (core + 5 图表 + 8 组件 + Canvas 渲染器), 日K/分时/持仓图表全部切换 — echarts 拆为独立懒加载 chunk (~1MB 不再进首包)
+- **查询 key 全面收编**: holdings 相关 13 个裸字符串 key 全部收编 QK 工厂 (accounts/sparklines/targets/monthly-stats/reports/benchmark/settings 等)
+- **useTzzbJobs hook 抽取**: 账本后台任务轮询与完成沿失效逻辑从页面抽出 (lib/useTzzbJobs.ts)
+- **AI 流取消**: ndjsonStream 生成器关闭时取消底层流 (reader.cancel), 关闭 AI 面板不再继续下载
 ## 0.1.88-0.54 (2026-09-13)
 
 ### 深度迭代 · 功能实用包

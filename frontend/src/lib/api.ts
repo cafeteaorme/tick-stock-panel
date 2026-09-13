@@ -80,9 +80,10 @@ async function* ndjsonStream<T>(path: string, init: RequestInit = {}): AsyncGene
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buf = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
     buf += decoder.decode(value, { stream: true })
     const lines = buf.split('\n')
     buf = lines.pop() ?? ''
@@ -93,6 +94,10 @@ async function* ndjsonStream<T>(path: string, init: RequestInit = {}): AsyncGene
   }
   if (buf.trim()) {
     try { yield JSON.parse(buf.trim()) as T } catch { /* ignore */ }
+    }
+  } finally {
+    // 生成器被提前关闭 (调用方 break/return/abort) 时取消底层流, 不再继续下载
+    reader.cancel().catch(() => {})
   }
 }
 

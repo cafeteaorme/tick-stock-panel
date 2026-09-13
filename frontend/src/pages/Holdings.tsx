@@ -7,7 +7,8 @@ import { toast } from '@/components/Toast'
 import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { SummaryCard, PnlCalendar, MonthlyBars, AssetCurve, HoldingsPie } from '@/components/holdings/charts'
 import { EditDialog, AddDialog, HoldingsSettingsDialog, TzzbCookieDialog, HoldingsImportDialog, DayDetailDialog, type PickedImage } from '@/components/holdings/dialogs'
-import { BgTasksPanel, AiReportPanel, type TzzbJob } from '@/components/holdings/panels'
+import { BgTasksPanel, AiReportPanel } from '@/components/holdings/panels'
+import { useTzzbJobs } from '@/lib/useTzzbJobs'
 import { fmtMoney, fmtPct, pnlColor, REGION_BADGE, todayIso, LoadingSkeleton, ErrorBanner, Spark } from '@/components/holdings/shared'
 
 type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_value' | 'float_pnl' | 'day_pnl'
@@ -68,7 +69,7 @@ export function Holdings() {
 
   // 账户
   const accountsQ = useQuery({
-    queryKey: ['holdings-accounts'],
+    queryKey: QK.holdingsAccounts,
     queryFn: api.holdingsAccounts,
     placeholderData: (prev) => prev,
     retry: 1,
@@ -114,7 +115,7 @@ export function Holdings() {
     placeholderData: (prev) => prev,
   })
   const benchmark = useQuery({
-    queryKey: ['holdings-benchmark', year, activeAcc],
+    queryKey: QK.holdingsBenchmark(year, activeAcc),
     queryFn: async () => {
       const st = await api.holdingsSettings()
       return api.holdingsBenchmark(`${year}-01-01`, st.benchmark)
@@ -124,7 +125,7 @@ export function Holdings() {
   })
   // 账本权威月度收益 (投资账本缓存)
   const historyData = useQuery({
-    queryKey: ['holdings-tzzb-history-data'],
+    queryKey: QK.holdingsTzzbHistoryData,
     queryFn: api.holdingsTzzbHistoryData,
   })
   // 清仓核对 (账本成交派生 vs 本地已清仓)
@@ -134,20 +135,20 @@ export function Holdings() {
   })
   // 月度胜率 (清仓轮次派生)
   const monthlyStats = useQuery({
-    queryKey: ['holdings-tzzb-monthly-stats'],
+    queryKey: QK.holdingsTzzbMonthlyStats,
     queryFn: api.holdingsMonthlyStats,
     staleTime: 5 * 60_000,
   })
   // 行内迷你走势 (近30日收盘, 10min 后端缓存)
   const sparkQ = useQuery({
-    queryKey: ['holdings-sparklines', activeAcc],
+    queryKey: QK.holdingsSparklines(activeAcc),
     queryFn: () => api.holdingsSparklines(activeAcc || undefined),
     staleTime: 60_000,
   })
   const sparkMap = useMemo(() => new Map(Object.entries(sparkQ.data?.sparklines ?? {})), [sparkQ.data])
   // 止盈止损: 目标价查询 + 现价穿越检测 (每 symbol 每日最多提示一次)
   const targetsQ = useQuery({
-    queryKey: ['holdings-targets', activeAcc],
+    queryKey: QK.holdingsTargets(activeAcc),
     queryFn: () => api.holdingsTargets(activeAcc || undefined),
     staleTime: 60_000,
   })
@@ -347,39 +348,8 @@ export function Holdings() {
     refetchInterval: 60_000,
   })
 
-  // 账本后台任务轮询: 页面级常驻 (任务面板关闭时也能感知完成)。运行中 1.5s, 空闲 8s
-  const jobsQ = useQuery({
-    queryKey: QK.holdingsTzzbJobs,
-    queryFn: api.holdingsTzzbJobs,
-    refetchInterval: (q: { state: { data?: { jobs: TzzbJob[] } } }) =>
-      (q.state.data?.jobs ?? []).some(j => j.status === 'running') ? 1_500 : 8_000,
-  })
-  // 运行→完成沿 (useEffect, 不在 refetchInterval 里做副作用):
-  // 只精确失效受影响的业务 key — 严禁无参 invalidateQueries (会清空全站缓存, 触发全应用请求风暴)
-  const prevJobStatus = useRef<Record<string, string>>({})
-  useEffect(() => {
-    for (const j of jobsQ.data?.jobs ?? []) {
-      const was = prevJobStatus.current[j.key]
-      prevJobStatus.current[j.key] = j.status
-      if (was !== 'running' || j.status !== 'done') continue
-      qc.invalidateQueries({ queryKey: QK.holdings })
-      qc.invalidateQueries({ queryKey: QK.holdingsSummary })
-      qc.invalidateQueries({ queryKey: ['holdings-pnl'] })
-      qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
-      qc.invalidateQueries({ queryKey: QK.holdingsTzzbJobs })
-      // 同步成功后链式更新真实成交缓存 (B/S 点 + 清仓核对数据源)
-      if (j.key === 'sync' && j.ok) {
-        api.holdingsTzzbTradesRefresh()
-          .then(() => {
-            qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() })
-            qc.invalidateQueries({ queryKey: ['holdings-tzzb-monthly-stats'] })
-          })
-          .catch(() => {})
-      }
-      if (j.ok) toast(`${j.label || j.key}完成：${j.message || ''}`, 'success')
-      else toast(`${j.label || j.key}失败：${j.message || ''}`, 'error')
-    }
-  }, [jobsQ.data, qc])
+  // 账本后台任务轮询 (完成沿: 精确失效 + toast, 见 lib/useTzzbJobs.ts)
+  const jobsQ = useTzzbJobs()
 
   const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)
@@ -482,7 +452,7 @@ export function Holdings() {
               const name = window.prompt('新账户名称（如「港美股」「打新」）')
               if (!name?.trim()) return
               api.holdingsCreateAccount(name.trim()).then(acc => {
-                qc.invalidateQueries({ queryKey: ['holdings-accounts'] })
+                qc.invalidateQueries({ queryKey: QK.holdingsAccounts })
                 setActiveAcc(acc.id)
                 toast(`账户「${acc.name}」已创建`, 'success')
               }).catch(() => toast('创建失败', 'error'))

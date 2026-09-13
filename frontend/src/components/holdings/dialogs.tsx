@@ -12,7 +12,7 @@ import { fmtMoney, fmtPct, pnlColor, todayIso, refreshHoldingsCaches, type ShotS
 export function EditDialog({ row, onClose, account }: { row: HoldingRow; onClose: () => void; account?: string }) {
   const qc = useQueryClient()
   const targetsQ = useQuery({
-    queryKey: ['holdings-targets', account],
+    queryKey: QK.holdingsTargets(account),
     queryFn: () => api.holdingsTargets(account || undefined),
     enabled: !!account,
   })
@@ -260,7 +260,7 @@ export function ShotSummaryBlock({
 export function HistoryCacheBlock() {
   const qc = useQueryClient()
   const status = useQuery({
-    queryKey: ['holdings-tzzb-history'],
+    queryKey: QK.holdingsTzzbHistory,
     queryFn: api.holdingsTzzbHistoryStatus,
   })
   const [fetching, setFetching] = useState(false)
@@ -269,7 +269,7 @@ export function HistoryCacheBlock() {
     try {
       const res = await api.holdingsTzzbHistoryFetch()
       toast(res.message, res.ok ? 'success' : 'error')
-      qc.invalidateQueries({ queryKey: ['holdings-tzzb-history'] })
+      qc.invalidateQueries({ queryKey: QK.holdingsTzzbHistory })
     } catch (e) {
       toast(e instanceof Error ? e.message : '拉取失败', 'error')
     } finally {
@@ -333,7 +333,7 @@ export function HkRateAuto({ setHkRate }: { setHkRate: (v: string) => void }) {
 
 export function HoldingsSettingsDialog({ accountId, onClose }: { accountId: string; onClose: () => void }) {
   const qc = useQueryClient()
-  const settings = useQuery({ queryKey: ['holdings-settings'], queryFn: api.holdingsSettings })
+  const settings = useQuery({ queryKey: QK.holdingsSettings, queryFn: api.holdingsSettings })
   const [hkRate, setHkRate] = useState('')
   const [usRate, setUsRate] = useState('')
   const [deposit, setDeposit] = useState('')
@@ -360,7 +360,7 @@ export function HoldingsSettingsDialog({ accountId, onClose }: { accountId: stri
       snapshot_keep: keep ? Number(keep) : 0,
     }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['holdings-settings'] })
+      qc.invalidateQueries({ queryKey: QK.holdingsSettings })
       refreshHoldingsCaches(qc)
       toast('设置已保存', 'success')
       onClose()
@@ -759,7 +759,7 @@ export function HoldingsImportDialog({ onClose, initialImages }: { onClose: () =
           const patch: { cash?: number; initial_cap?: number } = {}
           if (syncCash && shotSummary?.cash_available != null) patch.cash = shotSummary.cash_available
           const capN = Number(baseCap)
-          if (capN > 0 && capN !== (await qc.fetchQuery({ queryKey: ['holdings-summary-base'], queryFn: () => api.holdingsSummary() })).initial_cap) patch.initial_cap = capN
+          if (capN > 0 && capN !== (await qc.fetchQuery({ queryKey: QK.holdingsSummaryBase, queryFn: () => api.holdingsSummary() })).initial_cap) patch.initial_cap = capN
           if (Object.keys(patch).length) await api.holdingsPortfolio(patch)
           qc.invalidateQueries({ queryKey: QK.holdingsSummary })
         }

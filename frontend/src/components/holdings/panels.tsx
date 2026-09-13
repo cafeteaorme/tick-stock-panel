@@ -6,7 +6,7 @@ import { QK } from '@/lib/queryKeys'
 import { toast } from '@/components/Toast'
 import { renderMd } from './shared'
 
-export type TzzbJob = { key: string; label?: string; status: string; ok?: boolean | null; message?: string; started_at?: string; finished_at?: string }
+import type { TzzbJob } from '@/lib/useTzzbJobs'
 
 
 export function BgTasksPanel({ jobs, onClose }: { jobs: TzzbJob[]; onClose: () => void }) {
@@ -88,7 +88,7 @@ export function AiReportPanel({ onClose }: { onClose: () => void }) {
   const [saved, setSaved] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const reportsQ = useQuery({
-    queryKey: ['holdings-reports'],
+    queryKey: QK.holdingsTzzbReports,
     queryFn: api.holdingsReportsList,
     enabled: showHistory,
   })
