@@ -474,14 +474,14 @@ def snapshot_keep_limit() -> int:
 def save_snapshot(account_id: str, date_iso: str, rows: list[dict] | None = None, cash: float | None = None) -> dict:
     obj_rows = rows if rows is not None else list_all(account_id)
     port = get_portfolio(account_id)
+    dedup: dict[str, dict] = {}
+    for r in obj_rows:
+        dedup[r["symbol"]] = {"symbol": r["symbol"], "qty": float(r.get("qty") or 0),
+                              "available": r.get("available"), "avg_cost": r.get("avg_cost")}
     obj = {
         "date": date_iso,
         "cash": float(cash) if cash is not None else port["cash"],
-        "rows": [
-            {"symbol": r["symbol"], "qty": float(r.get("qty") or 0),
-             "available": r.get("available"), "avg_cost": r.get("avg_cost")}
-            for r in obj_rows
-        ],
+        "rows": list(dedup.values()),
         "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
     }
     _atomic_write(_snap_dir(account_id) / f"{date_iso.replace('-', '')}.json",

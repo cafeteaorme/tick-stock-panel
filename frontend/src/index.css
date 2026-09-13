@@ -14,7 +14,7 @@
   --border: 240 6% 90%;      /* #E4E4E7 */
   --fg-primary: 240 6% 10%;  /* #18181B */
   --fg-secondary: 240 4% 35%;/* #52525B */
-  --fg-muted: 240 5% 65%;    /* #A1A1AA */
+  --fg-muted: 240 5% 68%;    /* 暗色提亮, 小字号可读性 */
   --accent: 217 91% 60%;     /* #3B82F6 电光蓝 */
   --bull: 4 87% 60%;         /* #F04438 红涨 */
   --bear: 152 67% 45%;       /* #12B76A 绿跌 */
@@ -76,4 +76,13 @@ body {
   -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: auto;
   text-rendering: optimizeLegibility;
+}
+
+@keyframes tfbar {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+@keyframes tfjob {
+  from { transform: translateX(-40%); }
+  to { transform: translateX(240%); }
 }

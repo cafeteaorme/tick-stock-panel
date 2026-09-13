@@ -1626,16 +1626,16 @@ export const api = {
     request<{ ok: boolean; message: string }>('/api/holdings/tzzb/open-login', { method: 'POST' }),
   holdingsTzzbClear: () =>
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
-  holdingsTzzbHistoryData: () =>
-    request<{ cached: boolean; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[] }>('/api/holdings/tzzb/history-data'),
+  holdingsTzzbHistoryData: (account?: string) =>
+    request<{ cached: boolean; scope?: 'account' | 'merged'; account?: string; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[] }>(`/api/holdings/tzzb/history-data${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsTargets: (account?: string) =>
     request<{ targets: Record<string, { tp?: number; sl?: number }> }>(`/api/holdings/targets${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsSetTarget: (symbol: string, tp: number | null, sl: number | null, account?: string) =>
     request<{ ok: boolean }>(`/api/holdings/targets/${encodeURIComponent(symbol)}?account=${encodeURIComponent(account || '')}`, { method: 'POST', body: JSON.stringify({ tp, sl }) }),
   holdingsSparklines: (account?: string) =>
     request<{ sparklines: Record<string, number[]> }>(`/api/holdings/sparklines${account ? `?account=${encodeURIComponent(account)}` : ''}`),
-  holdingsMonthlyStats: () =>
-    request<{ stats: { period: string; wins: number; losses: number; win_rate?: number | null; realized: number }[] }>('/api/holdings/tzzb/monthly-stats'),
+  holdingsMonthlyStats: (account?: string) =>
+    request<{ stats: { period: string; wins: number; losses: number; win_rate?: number | null; realized: number }[]; account?: string }>(`/api/holdings/tzzb/monthly-stats${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsTzzbHkRate: () =>
     request<{ rate: number; before: number }>('/api/holdings/tzzb/hk-rate'),
   holdingsTzzbHistoryStatus: () =>
@@ -1669,9 +1669,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ items, date, cash }),
     }),
-  holdingsPnlDay: (day: string) =>
+  holdingsPnlDay: (day: string, account?: string) =>
     request<{ date: string; total: number; rows: { symbol: string; name?: string | null; qty: number; close: number; pnl: number; pnl_pct: number | null }[] }>(
-      `/api/holdings/pnl/day/${day}`,
+      `/api/holdings/pnl/day/${day}${account ? `?account=${encodeURIComponent(account)}` : ''}`,
     ),
   async *holdingsAnalyzeStream(): AsyncGenerator<{
     type: 'meta' | 'delta' | 'error' | 'done'

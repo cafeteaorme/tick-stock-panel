@@ -643,17 +643,22 @@ def is_trading_day_today() -> bool:
 
 
 def fetch_history_cache() -> dict[str, Any]:
-    """拉取投资账本历史收益 (逐账户×逐年 month_calendar → profit_loss_list 月度权威值)。"""
+    """拉取投资账本历史收益 (逐账户×逐年 month_calendar → 月度权威值)。
+
+    按账户分桶存储 (payload.accounts[fund_key]) + 全账户合并口径 (monthly/yearly/curve)。
+    """
     cookie = _cdp_cookie()
     save_config(cookie=cookie)
     accounts_raw = _api("/caishen_fund/pc/account/v1/account_list", cookie, {})
-    fund_keys = [str(b.get("fund_key")) for b in (accounts_raw.get("common") or [])
-                 if b.get("fund_key")]
+    brokers = [(str(b.get("fund_key")), (b.get("brokername") or b.get("manualname") or "").strip())
+               for b in (accounts_raw.get("common") or []) if b.get("fund_key")]
 
     monthly_acc: dict[str, float] = {}
+    per_acc: dict[str, dict] = {fk: {"name": name, "monthly": {}} for fk, name in brokers}
     this_year = datetime.now(HK_TZ).date().year
     fetched_months = 0
-    for fk in fund_keys:
+    for fk, _name in brokers:
+        pm = per_acc[fk]["monthly"]
         for y in (this_year - 1, this_year, this_year - 2):
             params = {"year": str(y), "type": "common", "fund_key": fk,
                       "terminal": "123", "version": "11"}
@@ -670,12 +675,13 @@ def fetch_history_cache() -> dict[str, Any]:
                 if pl_v is None:
                     continue
                 period = f"{d[:4]}-{d[4:6]}"
+                pm[period] = round(pm.get(period, 0) + pl_v, 2)
                 monthly_acc[period] = round(monthly_acc.get(period, 0) + pl_v, 2)
                 fetched_months += 1
 
     if not monthly_acc:
         payload = {"ok": False, "date": datetime.now(HK_TZ).date().isoformat(),
-                   "monthly": [], "yearly": [],
+                   "monthly": [], "yearly": [], "curve": [], "accounts": {},
                    "message": "未拉取到历史收益数据（账户无记录或接口变化）"}
         _atomic_write_json(_hist_path(), payload)
         return {"ok": False, "message": payload["message"]}
@@ -686,7 +692,7 @@ def fetch_history_cache() -> dict[str, Any]:
 
     # 真实资产趋势 (含出入金): 逐账户 asset_trend 按日合并
     trend: dict[str, dict] = {}
-    for fk in fund_keys:
+    for fk in per_acc:
         try:
             ex = _api("/caishen_fund/pc/asset/v1/asset_trend", cookie,
                       {"fund_key": fk, "type": "common"})
@@ -704,22 +710,33 @@ def fetch_history_cache() -> dict[str, Any]:
             cur["fundOut"] += _f_pl(row.get("fundOut")) or 0
     trend_list = [{"date": k, **{kk: round(vv, 2) for kk, vv in v.items()}} for k, v in sorted(trend.items())]
 
+    def _mk(monthly_map: dict[str, float]) -> dict:
+        yearly_m: dict[str, float] = {}
+        for period, v in monthly_map.items():
+            yearly_m[period[:4]] = round(yearly_m.get(period[:4], 0) + v, 2)
+        cum = 0.0
+        curve_m = []
+        for k, v in sorted(monthly_map.items()):
+            cum = round(cum + v, 2)
+            curve_m.append({"period": k, "pnl": v, "cum": cum})
+        return {
+            "monthly": [{"period": k, "pnl": v} for k, v in sorted(monthly_map.items())],
+            "yearly": [{"period": k, "pnl": v} for k, v in sorted(yearly_m.items())],
+            "curve": curve_m,
+        }
+
+    merged = _mk(monthly_acc)
     payload = {
         "ok": True,
         "date": datetime.now(HK_TZ).date().isoformat(),
         "fetched_at": datetime.utcnow().isoformat(timespec="seconds"),
-        "monthly": [{"period": k, "pnl": v} for k, v in sorted(monthly_acc.items())],
-        "yearly": [{"period": k, "pnl": v} for k, v in sorted(yearly.items())],
+        **merged,
         "asset_trend": trend_list,
         "trading_day_info": _last_trading_day_info(),
+        # 按账户分桶 (name/monthly/yearly/curve)
+        "accounts": {fk: {"name": meta["name"], **_mk(meta["monthly"])}
+                     for fk, meta in per_acc.items()},
     }
-    # 月度累计盈亏曲线 (账本权威, 全历史; 无需本金即可看复利轨迹)
-    cum = 0.0
-    curve = []
-    for k, v in sorted(monthly_acc.items()):
-        cum = round(cum + v, 2)
-        curve.append({"period": k, "pnl": v, "cum": cum})
-    payload["curve"] = curve
     _atomic_write_json(_hist_path(), payload)
     return {"ok": True, "message": f"历史收益缓存成功：{len(monthly_acc)} 个月（{fetched_months} 条记录），资产趋势 {len(trend_list)} 天"}
 
@@ -979,11 +996,13 @@ def round_stats_for(account_name: str | None, symbols: list[str]) -> dict[str, d
     return out
 
 
-def monthly_stats() -> list[dict]:
-    """按清仓轮次聚合月度胜率 (真实成交派生, 优于空值的账本 win_rate 接口)。"""
+def monthly_stats(account_name: str | None = None) -> list[dict]:
+    """按清仓轮次聚合月度胜率 (真实成交派生, 优于空值的账本 win_rate 接口)。可按账户过滤。"""
     obj = load_trades_cache()
     acc: dict[str, dict] = {}
     for c in obj.get("cleared") or []:
+        if account_name and c.get("account_name") != account_name:
+            continue
         m = (c.get("last_sell") or "")[:7]
         if not m:
             continue

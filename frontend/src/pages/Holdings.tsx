@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BookMarked, Briefcase, Camera, ChevronDown, Loader2, Pencil, PieChart as PieIcon, Plus, RefreshCw, SettingsIcon, Sparkles, TrendingUp, Trash2 } from 'lucide-react'
 import { api, type HoldingRow } from '@/lib/api'
@@ -59,6 +60,13 @@ export function Holdings() {
     catch { return new Set() }
   })
   const [showColMenu, setShowColMenu] = useState(false)
+  const colMenuBtnRef = useRef<HTMLButtonElement>(null)
+  const [colMenuPos, setColMenuPos] = useState<{ top: number; left: number } | null>(null)
+  const openColMenu = () => {
+    const rect = colMenuBtnRef.current?.getBoundingClientRect()
+    if (rect) setColMenuPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 192) })
+    setShowColMenu(v => !v)
+  }
   const toggleCol = (k: string) => {
     const next = new Set(hiddenCols)
     if (next.has(k)) next.delete(k)
@@ -125,8 +133,8 @@ export function Holdings() {
   })
   // 账本权威月度收益 (投资账本缓存)
   const historyData = useQuery({
-    queryKey: QK.holdingsTzzbHistoryData,
-    queryFn: api.holdingsTzzbHistoryData,
+    queryKey: [...QK.holdingsTzzbHistoryData, activeAcc],
+    queryFn: () => api.holdingsTzzbHistoryData(activeAcc || undefined),
   })
   // 清仓核对 (账本成交派生 vs 本地已清仓)
   const clearedCheck = useQuery({
@@ -135,8 +143,8 @@ export function Holdings() {
   })
   // 月度胜率 (清仓轮次派生)
   const monthlyStats = useQuery({
-    queryKey: QK.holdingsTzzbMonthlyStats,
-    queryFn: api.holdingsMonthlyStats,
+    queryKey: [...QK.holdingsTzzbMonthlyStats, activeAcc],
+    queryFn: () => api.holdingsMonthlyStats(activeAcc || undefined),
     staleTime: 5 * 60_000,
   })
   // 行内迷你走势 (近30日收盘, 10min 后端缓存)
@@ -310,8 +318,8 @@ export function Holdings() {
         <td className="px-3 py-2.5">
           <div className="flex items-center gap-1.5">
             {(REGION_BADGE[r.region ?? 'CN']) && <span className={`px-1 py-px rounded text-[10px] font-bold border ${REGION_BADGE[r.region ?? 'CN'].cls}`}>{REGION_BADGE[r.region ?? 'CN'].label}</span>}
-            <span className="text-foreground font-medium">{r.name || '—'}</span>
-            <span className="font-mono text-muted text-xs">{r.symbol}</span>
+            <span className="text-foreground font-medium whitespace-nowrap">{r.name || '—'}</span>
+            <span className="font-mono text-muted text-xs whitespace-nowrap">{r.symbol}</span>
           </div>
         </td>
       )
@@ -350,6 +358,7 @@ export function Holdings() {
 
   // 账本后台任务轮询 (完成沿: 精确失效 + toast, 见 lib/useTzzbJobs.ts)
   const jobsQ = useTzzbJobs()
+  const syncingNow = (jobsQ.data?.jobs ?? []).some(j => j.status === 'running')
 
   const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)
@@ -430,10 +439,19 @@ export function Holdings() {
             return (
               <button key={a.id}
                 onClick={() => {
+                  if (a.id === activeAcc) return
                   setActiveAcc(a.id)
                   localStorage.setItem('tf-holdings-account', a.id)
                   api.holdingsSetActiveAccount(a.id).catch(() => {})
-                  refreshAll()
+                  // 切户: 立即失效并重拉该账户全部数据 (配合顶部进度条提示加载中)
+                  qc.invalidateQueries({ queryKey: QK.holdings })
+                  qc.invalidateQueries({ queryKey: QK.holdingsSummary })
+                  qc.invalidateQueries({ queryKey: ['holdings-pnl'] })
+                  qc.invalidateQueries({ queryKey: ['holdings-benchmark'] })
+                  qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() })
+                  qc.invalidateQueries({ queryKey: QK.holdingsSparklines(a.id) })
+                  qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbHistoryData, a.id] })
+                  qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbMonthlyStats, a.id] })
                 }}
                 className={`px-2.5 py-1 rounded-[6px] text-xs transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
                 title={`${a.name} · ${a.positions ?? 0} 只持仓${(a.tzzb_count ?? 0) > 0 ? ` · 账本同步 ${a.tzzb_count} 只` : ''}`}>
@@ -496,6 +514,12 @@ export function Holdings() {
         <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90"><Plus className="h-3.5 w-3.5" />手动添加</button>
       </div>
 
+      {(syncingNow || holdings.isFetching || summary.isFetching) && (
+        <div className="sticky top-0 z-20 h-0.5 w-full bg-elevated/60 overflow-hidden" title="数据加载中">
+          <div className="h-full w-1/3 bg-accent/80 animate-[tfbar_1.1s_ease-in-out_infinite_alternate]" />
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
         {summary.error && <ErrorBanner message={`汇总加载失败：${(summary.error as Error).message}`} onRetry={refreshAll} />}
         {holdings.error && <ErrorBanner message={`持仓加载失败：${(holdings.error as Error).message}`} onRetry={refreshAll} />}
@@ -542,11 +566,12 @@ export function Holdings() {
             </button>
             <div className="flex-1" />
             <div className="relative">
-              <button onClick={() => setShowColMenu(v => !v)} className="text-[11px] text-secondary hover:text-foreground">
+              <button ref={colMenuBtnRef} onClick={openColMenu} className="text-[11px] text-secondary hover:text-foreground">
                 列显示
               </button>
-              {showColMenu && (
-                <div className="absolute right-0 top-full mt-1 z-30 w-48 rounded-btn border border-border bg-surface shadow-xl p-2 space-y-0.5 max-h-[70vh] overflow-y-auto">
+              {showColMenu && createPortal(
+                <div className="fixed w-48 rounded-btn border border-border bg-surface p-2 space-y-0.5 max-h-[70vh] overflow-y-auto"
+                  style={{ top: colMenuPos?.top ?? 0, left: colMenuPos?.left ?? 0 }}>
                   <div className="flex items-center justify-between px-1.5 pb-1">
                     <span className="text-[10px] text-muted">↑↓ 调整列顺序</span>
                     <button onClick={() => { setHiddenCols(new Set()); localStorage.setItem('tf-holdings-hidden-cols', '[]') }}
@@ -584,7 +609,8 @@ export function Holdings() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
             <button
@@ -597,7 +623,7 @@ export function Holdings() {
             >导出 Excel</button>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]" style={{ minWidth: Math.max(visibleCols.length, 6) * 92 }}>
+            <table className="w-full text-[13px]" style={{ minWidth: visibleCols.reduce((w, k) => w + ({ name: 190, trend: 96, first_buy: 104, buy_avg: 96, market_value: 110, float_pnl: 132 } as Record<string, number>)[k] || 92, 40) }}>
               <thead>
                 <tr className="text-muted border-b border-border/60 bg-elevated/30">
                   {visibleCols.map(k => {
@@ -790,7 +816,7 @@ export function Holdings() {
                 </div>
                 <div className="flex-1 min-h-0">
                   {pnl.isLoading ? <LoadingSkeleton height={300} />
-                    : <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} fillHeight />}
+                    : <PnlCalendar daily={pnl.data?.daily ?? []} onPickDay={setDayDetail} fillHeight ledgerMonthly={historyData.data?.monthly} />}
                 </div>
               </div>
             </div>

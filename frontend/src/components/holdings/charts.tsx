@@ -90,7 +90,7 @@ export function SummaryCard({ s, onSetCap }: {
  * ================================================================ */
 
 
-export function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: string; pnl: number }[]; onPickDay: (d: string) => void; fillHeight?: boolean }) {
+export function PnlCalendar({ daily, onPickDay, fillHeight, ledgerMonthly }: { daily: { date: string; pnl: number }[]; onPickDay: (d: string) => void; fillHeight?: boolean; ledgerMonthly?: { period: string; pnl: number }[] }) {
   const [month, setMonth] = useState(() => {
     const last = daily[daily.length - 1]
     return last ? last.date.slice(0, 7) : new Date().toISOString().slice(0, 7)
@@ -124,6 +124,10 @@ export function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: s
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
   }
 
+  // 该月无本地逐日数据时, 显示账本月度权威值 (历史月份本地快照缺失)
+  const ledgerPnl = ledgerMonthly?.find(x => x.period === month)?.pnl
+  const noLocalDays = monthDays.length === 0
+
   return (
     <div className={fillHeight ? 'flex flex-col h-full min-h-0' : ''}>
       <div className="flex items-center justify-center gap-2 mb-3">
@@ -135,6 +139,11 @@ export function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: s
       <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-muted mb-1">
         {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d}>{d}</div>)}
       </div>
+      {noLocalDays && ledgerPnl != null && (
+        <div className="rounded-btn border border-border bg-elevated/40 px-3 py-2 mb-1.5 text-xs text-secondary text-center shrink-0">
+          本地无该月逐日快照 · 账本月收益 <b className={`tabular-nums ${pnlColor(ledgerPnl)}`}>{fmtMoney(ledgerPnl)}</b>
+        </div>
+      )}
       <div className={`grid grid-cols-7 gap-1 ${fillHeight ? 'flex-1 min-h-0 grid-rows-6' : ''}`}>
         {cells.map((c, i) => (
           <button

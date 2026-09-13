@@ -608,8 +608,8 @@ def tzzb_clear_cookie():
 
 
 @router.get("/tzzb/history-data")
-def tzzb_history_data():
-    """缓存的账本历史收益 (月/年权威值 + 累计曲线 + 出入金)。"""
+def tzzb_history_data(request: Request, account: str | None = Query(None)):
+    """缓存的账本历史收益。传 account → 该账户分桶; 缺省 → 全账户合并。"""
     from app.config import settings
     from app.services import tzzb
 
@@ -618,7 +618,17 @@ def tzzb_history_data():
         return {"cached": False}
     try:
         obj = json.loads(p.read_text("utf-8"))
-        out = {"cached": bool(obj.get("ok")), **obj}
+        out: dict = {"cached": bool(obj.get("ok"))}
+        acc = _acc(request, account)
+        acc_name = next((a["name"] for a in holdings_service.list_accounts()["accounts"] if a["id"] == acc), None)
+        bucket = next((v for v in (obj.get("accounts") or {}).values()
+                       if acc_name and v.get("name") == acc_name), None) if acc_name else None
+        src = bucket if bucket else obj
+        for k in ("monthly", "yearly", "curve", "asset_trend", "trading_day_info", "accounts"):
+            if k in src:
+                out[k] = src[k]
+        out["scope"] = "account" if bucket else "merged"
+        out["account"] = acc_name
         # 出入金来自成交缓存 (best-effort)
         tc = tzzb.load_trades_cache()
         out["bank"] = tc.get("bank") or []
@@ -1104,11 +1114,13 @@ def tzzb_trades(symbol: str | None = Query(None)):
 
 
 @router.get("/tzzb/monthly-stats")
-def tzzb_monthly_stats():
-    """月度胜率统计 (清仓轮次派生: 胜/负轮数、胜率、当月已实现)。"""
+def tzzb_monthly_stats(request: Request, account: str | None = Query(None)):
+    """月度胜率统计 (清仓轮次派生)。传 account → 按账户过滤。"""
     from app.services import tzzb
 
-    return {"stats": tzzb.monthly_stats()}
+    acc = _acc(request, account)
+    acc_name = next((a["name"] for a in holdings_service.list_accounts()["accounts"] if a["id"] == acc), None)
+    return {"stats": tzzb.monthly_stats(acc_name), "account": acc_name}
 
 
 @router.post("/tzzb/trades/refresh")

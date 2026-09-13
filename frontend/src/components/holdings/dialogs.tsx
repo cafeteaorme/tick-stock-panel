@@ -960,10 +960,10 @@ export function HoldingsImportDialog({ onClose, initialImages }: { onClose: () =
  * ================================================================ */
 
 
-export function DayDetailDialog({ day, onClose }: { day: string; onClose: () => void }) {
+export function DayDetailDialog({ day, onClose, account }: { day: string; onClose: () => void; account?: string }) {
   const q = useQuery({
-    queryKey: ['holdings-pnl-day', day],
-    queryFn: () => api.holdingsPnlDay(day),
+    queryKey: ['holdings-pnl-day', day, account],
+    queryFn: () => api.holdingsPnlDay(day, account || undefined),
     staleTime: 5 * 60_000,
   })
   const total = q.data?.total ?? 0

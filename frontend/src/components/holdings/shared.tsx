@@ -42,7 +42,7 @@ export function fmtPct(v: number | null | undefined, digits = 2): string {
 
 
 export const pnlColor = (v: number | null | undefined) =>
-  v == null ? 'text-muted' : v > 0 ? 'text-[#ef4444]' : v < 0 ? 'text-[#22c55e]' : 'text-muted'
+  v == null ? 'text-secondary' : v > 0 ? 'text-[#ef4444]' : v < 0 ? 'text-[#22c55e]' : 'text-secondary'
 
 
 export const REGION_BADGE: Record<string, { label: string; cls: string }> = {
