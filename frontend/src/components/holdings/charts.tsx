@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
 import type { HoldingRow, HoldingsSummary } from '@/lib/api'
-import { EChart, TOOLTIP_STYLE, fmtMoney, fmtPnlPct, fmtPct, pnlColor } from './shared'
+import { EChart, TOOLTIP_STYLE, CHART_AXIS, fmtMoney, fmtPnlPct, fmtPct, pnlColor } from './shared'
 
 export function SummaryCard({ s, onSetCap }: {
   s: HoldingsSummary
@@ -14,11 +14,22 @@ export function SummaryCard({ s, onSetCap }: {
     setEditingCap(false)
   }
   return (
-    <div className="rounded-card border border-border bg-surface p-5 md:p-6">
-      <div className="grid grid-cols-2 gap-6">
+    <div className="rounded-card border border-border bg-gradient-to-br from-surface via-surface to-elevated/50 p-5 md:p-6 shadow-sm">
+      <div className="grid grid-cols-2 gap-6 items-end">
         <div>
-          <div className="text-xs text-muted">总资产{ s.initial_cap ? <span className="ml-1">（本金 {fmtMoney(s.initial_cap, 0)}）</span> : null }</div>
-          <div className={`text-3xl md:text-4xl font-bold tabular-nums mt-1.5 tracking-tight ${pnlColor(s.cum_pnl)}`}>{fmtMoney(s.total_asset)}</div>
+          <div className="text-xs text-muted flex items-center gap-2">
+            总资产
+            {s.initial_cap ? <span className="px-1.5 py-px rounded bg-elevated text-[10px] text-secondary">本金 {fmtMoney(s.initial_cap, 0)}</span> : null}
+          </div>
+          <div className="flex items-baseline gap-3 mt-1.5 flex-wrap">
+            <div className={`text-3xl md:text-4xl font-bold tabular-nums tracking-tight ${pnlColor(s.cum_pnl)}`}>{fmtMoney(s.total_asset)}</div>
+            {s.day_pnl != null && (
+              <span className={`px-1.5 py-0.5 rounded-md text-xs font-semibold tabular-nums ${s.day_pnl >= 0 ? 'bg-[#ef4444]/12 text-[#ef4444]' : 'bg-[#22c55e]/12 text-[#22c55e]'}`}
+                title="当日盈亏">
+                {s.day_pnl >= 0 ? '▲' : '▼'} {fmtMoney(s.day_pnl)}{s.day_pnl_pct != null ? ` (${fmtPct(s.day_pnl_pct)})` : ''}
+              </span>
+            )}
+          </div>
         </div>
         <div>
           <div className="text-xs text-muted">累计盈亏<span className="ml-1">（总资产-本金）</span></div>
@@ -48,12 +59,7 @@ export function SummaryCard({ s, onSetCap }: {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
-        <div>
-          <div className="text-xs text-muted">当日盈亏</div>
-          <div className={`text-lg font-bold tabular-nums mt-1 ${pnlColor(s.day_pnl)}`}>{fmtMoney(s.day_pnl)}</div>
-          <div className={`text-sm tabular-nums ${pnlColor(s.day_pnl_pct)}`}>{fmtPct(s.day_pnl_pct)}</div>
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-5">
         <div>
           <div className="text-xs text-muted">账本总盈亏（浮+已实现）</div>
           <div className={`text-lg font-bold tabular-nums mt-1 ${pnlColor(s.total_pnl)}`}>{fmtMoney(s.total_pnl)}</div>
@@ -150,6 +156,19 @@ export function PnlCalendar({ daily, onPickDay, fillHeight }: { daily: { date: s
           </button>
         ))}
       </div>
+      {(() => {
+        const wins = monthDays.filter(d => d.pnl > 0).length
+        const losses = monthDays.filter(d => d.pnl < 0).length
+        const best = monthDays.reduce<{ pnl: number } | null>((a, b) => (!a || b.pnl > a.pnl ? b : a), null)
+        const worst = monthDays.reduce<{ pnl: number } | null>((a, b) => (!a || b.pnl < a.pnl ? b : a), null)
+        return (
+          <div className="flex items-center justify-between mt-1.5 px-0.5 text-[10px] text-muted tabular-nums shrink-0">
+            <span>盈利 <b className="text-[#ef4444]">{wins}</b> 天 · 亏损 <b className="text-[#22c55e]">{losses}</b> 天</span>
+            {best && best.pnl > 0 && <span>最大盈 <span className="text-[#ef4444]">+{fmtMoney(best.pnl, 0)}</span></span>}
+            {worst && worst.pnl < 0 && <span>最大亏 <span className="text-[#22c55e]">{fmtMoney(worst.pnl, 0)}</span></span>}
+          </div>
+        )
+      })()}
       <div className="flex items-center justify-between mt-2 text-[10px] text-muted shrink-0">
         <span>亏损</span>
         <div className="flex gap-0.5">
@@ -183,8 +202,8 @@ export function MonthlyBars({ monthly, stats }: { monthly: { period: string; pnl
         return rows.join('<br/>')
       },
     },
-    xAxis: { type: 'category', data: monthly.map(r => `${Number(r.period.slice(5))}月`), axisLabel: { fontSize: 10 } },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: (v: number) => fmtMoney(v, 0) }, splitLine: { lineStyle: { color: 'rgba(128,128,140,0.15)' } } },
+    xAxis: { type: 'category', data: monthly.map(r => `${Number(r.period.slice(5))}月`), axisLabel: CHART_AXIS.axisLabel },
+    yAxis: { type: 'value', axisLabel: { ...CHART_AXIS.axisLabel, formatter: (v: number) => fmtMoney(v, 0) }, splitLine: CHART_AXIS.splitLine },
     series: [{
       type: 'bar', barMaxWidth: 28,
       data: monthly.map(r => {
@@ -231,9 +250,9 @@ export function AssetCurve({ daily, benchmark, ledgerCum }: {
       grid: { left: 60, right: 56, top: 28, bottom: 28 },
       tooltip: { trigger: 'axis', ...TOOLTIP_STYLE },
       legend: { show: !!benchmark || !!ledgerCum?.length, top: 0, right: 0, textStyle: { fontSize: 10 }, itemWidth: 14, itemHeight: 8 },
-      xAxis: { type: 'category', data: dates.map(r => r.slice(5)), axisLabel: { fontSize: 9 } },
+      xAxis: { type: 'category', data: dates.map(r => r.slice(5)), axisLabel: { ...CHART_AXIS.axisLabel, fontSize: 9 } },
       yAxis: [
-        { type: 'value', scale: true, axisLabel: { fontSize: 9, formatter: (v: number) => fmtMoney(v, 0) }, splitLine: { lineStyle: { color: 'rgba(128,128,140,0.15)' } } },
+        { type: 'value', scale: true, axisLabel: { ...CHART_AXIS.axisLabel, fontSize: 9, formatter: (v: number) => fmtMoney(v, 0) }, splitLine: CHART_AXIS.splitLine },
         { type: 'value', scale: true, axisLabel: { fontSize: 9, formatter: (v: number) => `${(v * 100).toFixed(0)}%` }, splitLine: { show: false } },
       ],
       series: [

@@ -8,10 +8,10 @@ import { StockPreviewDialog } from '@/components/StockPreviewDialog'
 import { SummaryCard, PnlCalendar, MonthlyBars, AssetCurve, HoldingsPie } from '@/components/holdings/charts'
 import { EditDialog, AddDialog, HoldingsSettingsDialog, TzzbCookieDialog, HoldingsImportDialog, DayDetailDialog, type PickedImage } from '@/components/holdings/dialogs'
 import { BgTasksPanel, AiReportPanel, type TzzbJob } from '@/components/holdings/panels'
-import { fmtMoney, fmtPct, pnlColor, REGION_BADGE, todayIso, LoadingSkeleton, ErrorBanner } from '@/components/holdings/shared'
+import { fmtMoney, fmtPct, pnlColor, REGION_BADGE, todayIso, LoadingSkeleton, ErrorBanner, Spark } from '@/components/holdings/shared'
 
 type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_value' | 'float_pnl' | 'day_pnl'
-  | 'first_buy' | 'buy_avg'
+  | 'first_buy' | 'buy_avg' | 'trend'
   | 'pre_profit' | 'hold_days' | 'm1_rate' | 'm3_rate' | 'm6_rate' | 'm12_rate' | 'position_rate'
 
 export function Holdings() {
@@ -138,6 +138,13 @@ export function Holdings() {
     queryFn: api.holdingsMonthlyStats,
     staleTime: 5 * 60_000,
   })
+  // 行内迷你走势 (近30日收盘, 10min 后端缓存)
+  const sparkQ = useQuery({
+    queryKey: ['holdings-sparklines', activeAcc],
+    queryFn: () => api.holdingsSparklines(activeAcc || undefined),
+    staleTime: 60_000,
+  })
+  const sparkMap = useMemo(() => new Map(Object.entries(sparkQ.data?.sparklines ?? {})), [sparkQ.data])
   const [showTasks, setShowTasks] = useState(false)
 
   const rows = useMemo(() => {
@@ -160,6 +167,7 @@ export function Holdings() {
         case 'm12_rate': return r.m12_rate ?? -Infinity
         case 'position_rate': return r.position_rate ?? -Infinity
         case 'first_buy': return r.first_buy ?? ''
+        case 'trend': return -Infinity
         case 'buy_avg': return r.buy_avg ?? -Infinity
       }
     }
@@ -194,6 +202,7 @@ export function Holdings() {
     { key: 'name', label: '名称/代码' },
     { key: 'price', label: '现价' },
     { key: 'change_pct', label: '涨跌幅' },
+    { key: 'trend', label: '趋势' },
     { key: 'qty', label: '持仓/可用' },
     { key: 'avg_cost', label: '成本' },
     { key: 'market_value', label: '市值' },
@@ -274,6 +283,7 @@ export function Holdings() {
       )
       case 'price': return <td className={`px-3 py-2.5 tabular-nums font-medium ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</td>
       case 'change_pct': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>
+      case 'trend': return <td className="px-3 py-2.5"><Spark closes={sparkMap.get(r.symbol) ?? []} /></td>
       case 'qty': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>
       case 'avg_cost': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
       case 'market_value': return <td className="px-3 py-2.5 tabular-nums text-foreground">{r.qty === 0 ? '—' : fmtMoney(r.market_value)}</td>

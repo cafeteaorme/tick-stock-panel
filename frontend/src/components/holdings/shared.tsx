@@ -155,3 +155,27 @@ export function refreshHoldingsCaches(qc: ReturnType<typeof useQueryClient>) {
 }
 
 /** 投资账本连接对话框: 专用 Chrome 登录 (登录一次) + CDP 自动取 Cookie 同步 + 手动粘贴备用 */
+
+
+/** 全站图表轴/网格统一色 (A3 主题统一) */
+export const CHART_AXIS = {
+  axisLabel: { fontSize: 10, color: '#a1a1aa' },
+  splitLine: { lineStyle: { color: 'rgba(128,128,140,0.15)' } },
+}
+
+/** 行内迷你走势 (纯 SVG, 红涨绿跌) */
+export function Spark({ closes, width = 76, height = 24 }: { closes: number[]; width?: number; height?: number }) {
+  if (!closes || closes.length < 2) return <span className="text-muted text-xs">—</span>
+  const min = Math.min(...closes)
+  const max = Math.max(...closes)
+  const span = max - min || 1
+  const pts = closes.map((c, i) => `${(i / (closes.length - 1)) * (width - 4) + 2},${height - 3 - ((c - min) / span) * (height - 6)}`).join(' ')
+  const up = closes[closes.length - 1] >= closes[0]
+  const color = up ? '#ef4444' : '#22c55e'
+  return (
+    <svg width={width} height={height} className="inline-block align-middle" data-tip={`${closes[0]} → ${closes[closes.length - 1]}`}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.4" />
+      <circle cx={width - 2} cy={height - 3 - ((closes[closes.length - 1] - min) / span) * (height - 6)} r="1.8" fill={color} />
+    </svg>
+  )
+}

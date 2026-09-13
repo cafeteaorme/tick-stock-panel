@@ -1048,6 +1048,40 @@ def tzzb_jobs():
 
 
 _CLEARED_CHECK_CACHE: dict[tuple, tuple[float, dict]] = {}
+_SPARK_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+@router.get("/sparklines")
+def sparklines(request: Request, account: str | None = Query(None), days: int = Query(30, ge=10, le=90)):
+    """持仓行迷你走势: 各持仓近 N 日收盘序列 (10min 缓存)。"""
+    acc = _acc(request, account)
+    now = _time.monotonic()
+    hit = _SPARK_CACHE.get(acc)
+    if hit and now - hit[0] < 600:
+        return {"sparklines": hit[1]}
+    rows = holdings_service.list_all(acc)
+    symbols = [r["symbol"] for r in rows]
+    out: dict[str, list[float]] = {}
+    end = date.today()
+    start = end - timedelta(days=days + 25)
+    repo = request.app.state.repo
+    for sym in symbols:
+        try:
+            if is_hk_or_us(sym):
+                from app.services.kline_sync import fetch_hk_us_daily_with_indicators
+
+                df = fetch_hk_us_daily_with_indicators(sym, days=days + 25)
+            else:
+                df = repo.get_daily_batch([sym], start, end, columns=["date", "close"])
+            if df.is_empty():
+                continue
+            closes = [round(float(c), 4) for _d, c in df.sort("date").select(["date", "close"]).iter_rows()]
+            out[sym] = closes[-days:]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("sparkline %s failed: %s", sym, e)
+    _SPARK_CACHE[acc] = (now, out)
+    return {"sparklines": out}
+
 
 
 @router.get("/tzzb/cleared-check")
