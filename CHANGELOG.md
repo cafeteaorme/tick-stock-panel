@@ -35,6 +35,13 @@
 - **ESLint 落地**: 新增 flat config, `pnpm lint` 从"无配置空转"变为可用 (0 错误); 顺带修复 lint 抓到的真 bug——MiniIntraday 的 `useId` 在提前 return 之后条件调用
 - **小项**: theme-color 从紫色对齐 accent 蓝; 隐藏标签页停止 15s 轮询 (省电); 仓库内编译产物 (vite.config.js/.d.ts) 移出并进 gitignore; 高频 query key 收进 QK 常量
 
+## 0.1.88-0.57 (2026-09-16)
+
+### 修复: 新增持仓股 (次新股) 点击 500
+
+- **根因**: 有研硅 688432.SH 为次新股, 技术指标暖机期 (KDJ/量比等前若干日无基准) 计算出 NaN — JSON 序列化不容忍 NaN/Inf 直接 500。三个泄漏点: ① /kline/daily 的 live 兜底分支 (本地无该股数据时实时拉取) ② enriched 本地表分支 ③ **实时蜡烛注入** (_maybe_inject_live_candle 的行情快照自带 NaN 指标, 覆盖/追加两条路径都污染)
+- **修复**: 新增 _fin_rows() NaN/Inf→None 清洗, 统一应用于 live 分支/本地分支/实时行注入 (构造后即清洗, 覆盖与追加均安全); /kline/daily-batch 批量端点同步修复
+- 前端表现: NaN 指标字段显示为空而非整页报错
 ## 0.1.88-0.56 (2026-09-14)
 
 ### 九项 Bug 修复

@@ -364,13 +364,13 @@ def get_daily(
         except Exception as e:  # noqa: BLE001
             logger.debug("单股除权因子拉取失败 %s: %s", symbol, e)
         enriched = compute_enriched(raw, factors=factors)
-        rows = enriched.tail(days).to_dicts()
+        rows = _fin_rows(enriched.tail(days).to_dicts())
         # 即使 live 模式也尝试追加实时蜡烛
         rows = _maybe_inject_live_candle(request, symbol, rows, asset_type)
         resp = {"symbol": symbol, "name": stock_name, "stock_info": stock_info, "rows": rows, "source": "live"}
         return _attach_ext(resp, repo, symbol, ext_columns)
 
-    rows = df.to_dicts()
+    rows = _fin_rows(df.to_dicts())
 
     # 追加/覆盖今日实时蜡烛
     rows = _maybe_inject_live_candle(request, symbol, rows, asset_type)
@@ -509,6 +509,9 @@ def _maybe_inject_live_candle(request: Request, symbol: str, rows: list[dict], a
         if key in q and q[key] is not None:
             live_row[key] = q[key]
 
+    # 实时行本身先清洗 (行情快照里的指标可能 NaN, JSON 不容忍)
+    _fin_rows([live_row])
+
     # 如果已有今天的 enriched 行, 覆盖; 否则追加
     found = False
     for i, r in enumerate(rows):
@@ -586,7 +589,7 @@ def get_daily_batch(request: Request, body: dict):
     for sym in symbols:
         sub = df.filter(pl.col("symbol") == sym).sort("date").tail(days)
         if not sub.is_empty():
-            result[sym] = sub.to_dicts()
+            result[sym] = _fin_rows(sub.to_dicts())
 
     return {"data": result}
 
@@ -732,6 +735,17 @@ def get_minute_batch(request: Request, body: dict):
 
 # 分时响应缓存: 盘中实时拉 TickFlow 需 7-35s, SSE 行情更新又会频繁重触发请求 →
 # 按 (symbol, date) 做短 TTL 缓存; 收盘后/历史日长 TTL
+def _fin_rows(rows: list[dict]) -> list[dict]:
+    """NaN/Inf → None (JSON 不容忍非法浮点; 次新股指标暖机期常见 NaN)。"""
+    import math
+
+    for r in rows:
+        for k, v in r.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                r[k] = None
+    return rows
+
+
 _MINUTE_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
 _MINUTE_CACHE_LOCK = threading.Lock()
 
