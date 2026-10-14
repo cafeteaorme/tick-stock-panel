@@ -382,6 +382,42 @@ export function Holdings() {
     qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbMonthlyStats, id] })
   }
 
+  // 账户页签 (桌面页头 / 移动第二行 共用)
+  const accountTabs = (
+    <>
+      {[...accounts].sort((x, y) => (Number(x.id === 'default')) - Number(y.id === 'default')).map(a => {
+        const active = a.id === activeAcc
+        return (
+          <button key={a.id}
+            onClick={() => switchAccount(a.id)}
+            className={`px-2.5 py-1 rounded-[6px] text-xs whitespace-nowrap transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
+            title={`${a.name} · ${a.positions ?? 0} 只持仓${(a.tzzb_count ?? 0) > 0 ? ` · 账本同步 ${a.tzzb_count} 只` : ''}`}>
+            {a.name}
+            {(a.tzzb_count ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 ml-0.5 align-middle" />}
+            {(a.day_pnl != null) ? (
+              <span className={`ml-1 tabular-nums ${pnlColor(a.day_pnl)}`}>
+                {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[10px]"> {fmtPct(a.day_pnl_pct)}</span>}
+              </span>
+            ) : ((a.positions ?? 0) > 0 && <span className="ml-1 text-muted" title="行情加载中…">…</span>)}
+          </button>
+        )
+      })}
+      <button
+        onClick={() => {
+          const name = window.prompt('新账户名称（如「港美股」「打新」）')
+          if (!name?.trim()) return
+          api.holdingsCreateAccount(name.trim()).then(acc => {
+            qc.invalidateQueries({ queryKey: QK.holdingsAccounts })
+            setActiveAcc(acc.id)
+            toast(`账户「${acc.name}」已创建`, 'success')
+          }).catch(() => toast('创建失败', 'error'))
+        }}
+        className="px-1.5 py-1 rounded-[6px] text-xs text-muted hover:text-accent shrink-0"
+        title="新建账户"
+      >+</button>
+    </>
+  )
+
   const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)
     try {
@@ -449,77 +485,77 @@ export function Holdings() {
         </div>
       )}
       {/* 页头 */}
-      <div className="px-4 md:px-6 py-3 border-b border-border flex items-center gap-3 flex-wrap shrink-0">
-        <Briefcase className="h-5 w-5 text-accent" />
-        <h1 className="text-base font-bold text-foreground">我的持仓</h1>
-        <span className="text-xs text-muted">{rows.length} 只</span>
-        <div className="flex-1" />
-        {/* 账户页签: 名称 + 当日盈亏 (窄屏横滑) */}
-        <div className="flex items-center gap-1 p-0.5 rounded-btn bg-elevated max-w-[52vw] md:max-w-none overflow-x-auto [scrollbar-width:none] shrink-0">
-          {[...accounts].sort((x, y) => (Number(x.id === 'default')) - Number(y.id === 'default')).map(a => {
-            const active = a.id === activeAcc
-            return (
-              <button key={a.id}
-                onClick={() => switchAccount(a.id)}
-                className={`px-2.5 py-1 rounded-[6px] text-xs transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
-                title={`${a.name} · ${a.positions ?? 0} 只持仓${(a.tzzb_count ?? 0) > 0 ? ` · 账本同步 ${a.tzzb_count} 只` : ''}`}>
-                {a.name}
-                {(a.tzzb_count ?? 0) > 0 && <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 ml-0.5 align-middle" />}
-                {(a.day_pnl != null) ? (
-                  <span className={`ml-1 tabular-nums ${pnlColor(a.day_pnl)}`}>
-                    {fmtMoney(a.day_pnl)}{a.day_pnl_pct != null && <span className="text-[10px]"> {fmtPct(a.day_pnl_pct)}</span>}
-                  </span>
-                ) : ((a.positions ?? 0) > 0 && <span className="ml-1 text-muted" title="行情加载中…">…</span>)}
-              </button>
-            )
-          })}
-          <button
-            onClick={() => {
-              const name = window.prompt('新账户名称（如「港美股」「打新」）')
-              if (!name?.trim()) return
-              api.holdingsCreateAccount(name.trim()).then(acc => {
-                qc.invalidateQueries({ queryKey: QK.holdingsAccounts })
-                setActiveAcc(acc.id)
-                toast(`账户「${acc.name}」已创建`, 'success')
-              }).catch(() => toast('创建失败', 'error'))
-            }}
-            className="px-1.5 py-1 rounded-[6px] text-xs text-muted hover:text-accent"
-            title="新建账户"
-          >+</button>
+      {/* 页头: 移动端分行 (标题行 / 账户页签 / 图标操作), 桌面单行 */}
+      <div className="px-4 md:px-6 py-2.5 md:py-3 border-b border-border flex flex-col gap-2 shrink-0">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+          <Briefcase className="h-5 w-5 text-accent shrink-0" />
+          <h1 className="text-base font-bold text-foreground">我的持仓</h1>
+          <span className="text-xs text-muted">{rows.length} 只</span>
+          <div className="flex-1" />
+          {/* md+: 账户页签 */}
+          <div className="hidden md:flex items-center gap-1 p-0.5 rounded-btn bg-elevated max-w-[46vw] overflow-x-auto [scrollbar-width:none] shrink-0">
+            {accountTabs}
+          </div>
+          {tzzbStatus.data && (tzzbStatus.data.last_ok ? (
+            <button onClick={() => setShowTasks(true)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted tabular-nums hover:text-foreground shrink-0"
+              title={`投资账本数据更新于 ${tzzbStatus.data.last_sync} · 点击查看后台任务`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span className="hidden md:inline">数据 {tzzbStatus.data.last_sync?.slice(11, 16)}</span>
+            </button>
+          ) : (
+            <button onClick={() => void runTzzbSync()} disabled={tzzbSyncing}
+              className="inline-flex items-center gap-1 text-[11px] text-amber-400 disabled:opacity-40 shrink-0"
+              title={tzzbStatus.data.last_result || '投资账本数据尚未获取成功'}>
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+              <span className="hidden md:inline">重新导入投资账本数据</span>
+            </button>
+          ))}
+          <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated shrink-0" title="持仓设置">
+            <SettingsIcon className="h-4 w-4" />
+          </button>
         </div>
-        <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated" title="持仓设置">
-          <SettingsIcon className="h-4 w-4" />
-        </button>
-        {tzzbStatus.data && (tzzbStatus.data.last_ok ? (
-          <button onClick={() => setShowTasks(true)}
-            className="inline-flex items-center gap-1 text-[11px] text-muted tabular-nums hover:text-foreground"
-            title={`投资账本数据更新于 ${tzzbStatus.data.last_sync} · 点击查看后台任务`}>
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            数据 {tzzbStatus.data.last_sync?.slice(11, 16)}
+
+        {/* 移动端: 账户页签整行横滑 */}
+        <div className="md:hidden flex items-center gap-1 p-0.5 rounded-btn bg-elevated overflow-x-auto [scrollbar-width:none]">
+          {accountTabs}
+        </div>
+
+        {/* 桌面: 文字操作按钮 */}
+        <div className="hidden md:flex items-center gap-2">
+          <button
+            onClick={() => void runTzzbSync()}
+            disabled={tzzbSyncing}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn border border-rose-500/40 bg-rose-500/10 text-rose-400 text-xs font-medium hover:bg-rose-500/20 disabled:opacity-40"
+            title="从同花顺投资账本拉取持仓 (需在设置里配置 Cookie)"
+          >
+            <BookMarked className="h-3.5 w-3.5" />投资账本导入
           </button>
-        ) : (
+          <button onClick={() => void runTzzbSync(true)} disabled={tzzbSyncing}
+            className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated disabled:opacity-40"
+            title="刷新投资账本数据">
+            <RefreshCw className={`h-4 w-4 ${tzzbSyncing ? 'animate-spin' : ''}`} />
+          </button>
+          <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground border border-border"><Camera className="h-3.5 w-3.5" />截图导入</button>
+          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90"><Plus className="h-3.5 w-3.5" />手动添加</button>
+        </div>
+
+        {/* 移动端: 图标操作行 */}
+        <div className="md:hidden flex items-center gap-1">
           <button onClick={() => void runTzzbSync()} disabled={tzzbSyncing}
-            className="inline-flex items-center gap-1 text-[11px] text-amber-400 hover:underline disabled:opacity-40"
-            title={tzzbStatus.data.last_result || '投资账本数据尚未获取成功'}>
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            重新导入投资账本数据
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-btn border border-rose-500/40 bg-rose-500/10 text-rose-400 text-[11px] font-medium disabled:opacity-40"
+            title="投资账本导入/同步">
+            <BookMarked className="h-4 w-4" />{tzzbSyncing ? '同步中' : '账本'}
           </button>
-        ))}
-        <button
-          onClick={() => void runTzzbSync()}
-          disabled={tzzbSyncing}
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn border border-rose-500/40 bg-rose-500/10 text-rose-400 text-xs font-medium hover:bg-rose-500/20 disabled:opacity-40"
-          title="从同花顺投资账本拉取持仓 (需在设置里配置 Cookie)"
-        >
-          <BookMarked className="h-3.5 w-3.5" />投资账本导入
-        </button>
-        <button onClick={() => void runTzzbSync(true)} disabled={tzzbSyncing}
-          className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated disabled:opacity-40"
-          title="刷新投资账本数据">
-          <RefreshCw className={`h-4 w-4 ${tzzbSyncing ? 'animate-spin' : ''}`} />
-        </button>
-        <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground border border-border"><Camera className="h-3.5 w-3.5" />截图导入</button>
-        <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-btn bg-accent text-white text-xs font-medium hover:bg-accent/90"><Plus className="h-3.5 w-3.5" />手动添加</button>
+          <button onClick={() => void runTzzbSync(true)} disabled={tzzbSyncing}
+            className="p-1.5 rounded-btn text-secondary hover:text-foreground hover:bg-elevated disabled:opacity-40"
+            title="刷新投资账本数据">
+            <RefreshCw className={`h-4 w-4 ${tzzbSyncing ? 'animate-spin' : ''}`} />
+          </button>
+          <div className="flex-1" />
+          <button onClick={() => setShowImport(true)} className="p-2 rounded-btn bg-elevated text-secondary border border-border" title="截图导入"><Camera className="h-4 w-4" /></button>
+          <button onClick={() => setShowAdd(true)} className="inline-flex items-center gap-1 px-3 py-2 rounded-btn bg-accent text-white text-xs font-medium"><Plus className="h-4 w-4" />添加</button>
+        </div>
       </div>
 
       {(syncingNow || holdings.isFetching || summary.isFetching) && (

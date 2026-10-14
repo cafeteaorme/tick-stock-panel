@@ -91,3 +91,10 @@ body {
   from { transform: translateX(-100%); }
   to { transform: translateX(0); }
 }
+
+/* iOS Safari: 输入框字号 <16px 聚焦时自动放大页面 — 移动端统一 16px 根治 */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}

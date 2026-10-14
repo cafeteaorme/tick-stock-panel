@@ -660,7 +660,7 @@ export function Layout() {
 
   return (
     <div className="h-screen grid grid-cols-1 md:grid-cols-[14rem_1fr] grid-rows-[auto_1fr] md:grid-rows-1 bg-base text-foreground overflow-hidden">
-      {/* 移动顶栏: 汉堡 + 品牌缩写 (md 以下) */}
+      {/* 移动顶栏: 汉堡 + 品牌缩写 (md 以下; 不放档位徽章, 保持干净) */}
       <header className="md:hidden flex items-center gap-2 px-3 h-12 border-b border-border bg-surface shrink-0 z-30">
         <button
           onClick={() => setDrawerOpen(true)}
@@ -672,7 +672,7 @@ export function Layout() {
         <span className="font-mono font-bold text-[12px] tracking-[0.05em] text-foreground">TickFlow</span>
         <span className="text-[9px] uppercase tracking-[0.18em] text-muted">Stock Panel</span>
         <div className="flex-1" />
-        <TierBadge label={caps?.label ?? ''} hasKey={settingsState?.mode !== 'none'} />
+        <ThemeToggle />
       </header>
 
       {/* 桌面常驻侧栏 (md+) */}

@@ -40,6 +40,10 @@ function boardTag(symbol: string): { label: string; color: string } | null {
   return null
 }
 
+function isMobileViewport(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth < 768
+}
+
 export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers, markersSource }: Props & { markers?: any[]; markersSource?: 'tzzb' | 'calc' }) {
   const [showIntraday, setShowIntraday] = useState(false)
   const [viewMode5, setViewMode5] = useState(false)
@@ -133,11 +137,11 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 8 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="relative w-[92vw] max-w-[1100px] max-h-[95vh] rounded-card border border-border bg-base shadow-2xl overflow-hidden flex flex-col"
+            className="relative w-full md:w-[92vw] max-w-[1100px] h-[100dvh] md:h-auto md:max-h-[95vh] md:rounded-card border-0 md:border border-border bg-base shadow-2xl overflow-hidden flex flex-col"
           >
             {/* 顶栏 */}
-            <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-3 md:px-5 py-2.5 md:py-3 border-b border-border shrink-0 gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 {(() => {
                   const board = symbol ? boardTag(symbol) : null
                   return board ? (
@@ -146,8 +150,8 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                     </span>
                   ) : null
                 })()}
-                <span className="font-mono text-sm font-medium text-foreground">{symbol}</span>
-                {name && <span className="text-xs text-muted">{name}</span>}
+                <span className="font-mono text-sm font-medium text-foreground truncate">{symbol}</span>
+                {name && <span className="text-xs text-muted truncate hidden sm:inline">{name}</span>}
                 {holding && (
                   <span
                     title={`我的持仓 ${holding.qty} 股${holding.avg_cost ? ` · 成本 ${holding.avg_cost}` : ''} · 前往「持仓」页可编辑/卖出`}
@@ -158,7 +162,7 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 flex-wrap justify-end min-w-0">
                 {/* 日期范围快捷 */}
                 <button
                   onClick={() => { setViewMode5(true); const e = new Date(); const s2 = new Date(); s2.setDate(s2.getDate() - 6); setDateRange({ start: s2.toISOString().slice(0, 10), end: e.toISOString().slice(0, 10) }); setShowIntraday(false) }}
@@ -190,19 +194,21 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
                     </button>
                   )
                 })}
-                <DatePicker
-                  value={dateRange.start}
-                  onChange={(v) => setDateRange(prev => ({ ...prev, start: v }))}
-                  max={dateRange.end}
-                />
-                <span className="text-muted/40 text-[10px]">~</span>
-                <DatePicker
-                  value={dateRange.end}
-                  onChange={(v) => setDateRange(prev => ({ ...prev, end: v }))}
-                  min={dateRange.start}
-                />
+                <span className="hidden md:inline-flex">
+                  <DatePicker
+                    value={dateRange.start}
+                    onChange={(v) => setDateRange(prev => ({ ...prev, start: v }))}
+                    max={dateRange.end}
+                  />
+                  <span className="text-muted/40 text-[10px] mx-0.5 self-center">~</span>
+                  <DatePicker
+                    value={dateRange.end}
+                    onChange={(v) => setDateRange(prev => ({ ...prev, end: v }))}
+                    min={dateRange.start}
+                  />
+                </span>
 
-                <span className="text-muted/20 mx-0.5">|</span>
+                <span className="text-muted/20 mx-0.5 hidden md:inline">|</span>
 
                 {/* 分时开关。港美股分时依赖「港美股分时图」设置开关 (腾讯免费接口, 点击才加载), 未开启时不显示入口 */}
                 {hkUsIntradayAllowed ? (
@@ -291,11 +297,11 @@ export function StockPreviewDialog({ symbol, name, onClose, triggerInfo, markers
               </div>
             )}
 
-            {/* K 线内容 */}
-            <div className="flex-1 overflow-auto p-4">
+            {/* K 线内容 (移动端占满弹窗高度, 桌面固定 420) */}
+            <div className="flex-1 overflow-auto p-2 md:p-4">
               <StockPanel
                 symbol={symbol}
-                height={420}
+                height={isMobileViewport() ? Math.max(420, Math.round(window.innerHeight * 0.68)) : 420}
                 showIntraday={showIntraday}
                 markers={markers}
                 onSelectDate={() => { if (!showIntraday && hkUsIntradayAllowed) setShowIntraday(true) }}
