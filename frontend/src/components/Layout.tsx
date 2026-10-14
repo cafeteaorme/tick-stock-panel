@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, Suspense } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { useQuoteStream, useQuoteStreamStatus } from '@/lib/useQuoteStream'
@@ -44,6 +44,7 @@ import {
   ExternalLink,
   Sun,
   Moon,
+  Menu,
   X,
   WifiOff,
   Wallet,} from 'lucide-react'
@@ -399,6 +400,11 @@ export function Layout() {
   const hiddenIds = new Set(prefs?.nav_hidden ?? [])
   const visibleNavItems = navItems.filter(n => !hiddenIds.has(n.to) && !hiddenIds.has(n.to.replace(/^\/analysis\//, '')))
 
+  // 移动端抽屉: md 以下隐藏常驻侧栏, 汉堡唤出; 路由跳转自动关闭
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const location = useLocation()
+  useEffect(() => { setDrawerOpen(false) }, [location.pathname])
+
   const handleToggle = async (enabled: boolean) => {
     // 开启时重新校验档位
     if (enabled) {
@@ -420,9 +426,8 @@ export function Layout() {
     }
   }
 
-  return (
-    <div className="h-screen grid grid-cols-[14rem_1fr] bg-base text-foreground overflow-hidden">
-      <aside className="border-r border-border bg-surface flex flex-col h-full min-h-0 overflow-hidden">
+  const SidebarBody = (
+    <>
         <div className="px-5 py-5 border-b border-border shrink-0">
           {/* Brand block — 原创 logo + 等宽 wordmark */}
           <div className="flex items-center gap-2.5">
@@ -650,7 +655,47 @@ export function Layout() {
             </NavLink>
           </div>
         </div>
+    </>
+  )
+
+  return (
+    <div className="h-screen grid grid-cols-1 md:grid-cols-[14rem_1fr] grid-rows-[auto_1fr] md:grid-rows-1 bg-base text-foreground overflow-hidden">
+      {/* 移动顶栏: 汉堡 + 品牌缩写 (md 以下) */}
+      <header className="md:hidden flex items-center gap-2 px-3 h-12 border-b border-border bg-surface shrink-0 z-30">
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="p-2 -ml-1 rounded-btn text-secondary hover:text-foreground hover:bg-elevated"
+          aria-label="打开导航"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="font-mono font-bold text-[12px] tracking-[0.05em] text-foreground">TickFlow</span>
+        <span className="text-[9px] uppercase tracking-[0.18em] text-muted">Stock Panel</span>
+        <div className="flex-1" />
+        <TierBadge label={caps?.label ?? ''} hasKey={settingsState?.mode !== 'none'} />
+      </header>
+
+      {/* 桌面常驻侧栏 (md+) */}
+      <aside className="hidden md:flex border-r border-border bg-surface flex-col h-full min-h-0 overflow-hidden">
+        {SidebarBody}
       </aside>
+
+      {/* 移动抽屉 */}
+      {drawerOpen && (
+        <div className="md:hidden fixed inset-0 z-50" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={() => setDrawerOpen(false)} />
+          <div className="absolute inset-y-0 left-0 w-64 max-w-[82vw] border-r border-border bg-surface flex flex-col shadow-2xl animate-[tfdrawer_.18s_ease-out]">
+            <button
+              onClick={() => setDrawerOpen(false)}
+              className="absolute top-3 right-2 z-10 p-1.5 rounded-btn text-muted hover:text-foreground hover:bg-elevated"
+              aria-label="关闭导航"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            {SidebarBody}
+          </div>
+        </div>
+      )}
 
       <motion.main
         initial={{ opacity: 0, y: 8 }}

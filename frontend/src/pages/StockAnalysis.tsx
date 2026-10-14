@@ -105,7 +105,7 @@ export function StockAnalysis() {
               >
                 <span className="text-foreground font-medium group-hover:text-sky-300 transition-colors">{name || symbol}</span>
                 <span className="text-[10px] font-mono text-muted">{symbol}</span>
-                <ExternalLink className="h-3 w-3 text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                <ExternalLink className="h-3 w-3 text-muted/70 md:opacity-0 md:group-hover:opacity-100 transition-opacity" />
               </button>
               <button
                 onClick={handleAnalyze}
@@ -298,7 +298,7 @@ function HistorySidebar() {
                   </button>
                   <button
                     onClick={() => { deleteReport(r.id); toast('已删除', 'success') }}
-                    className="shrink-0 text-[10px] text-muted/60 hover:text-danger transition-colors px-1 py-0.5 opacity-0 group-hover:opacity-100"
+                    className="shrink-0 text-[10px] text-muted/60 hover:text-danger transition-colors px-1.5 py-1 opacity-60 md:opacity-0 md:group-hover:opacity-100"
                     title="删除"
                   >
                     删除

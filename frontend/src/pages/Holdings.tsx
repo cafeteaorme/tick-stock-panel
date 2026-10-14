@@ -432,8 +432,8 @@ export function Holdings() {
         <h1 className="text-base font-bold text-foreground">我的持仓</h1>
         <span className="text-xs text-muted">{rows.length} 只</span>
         <div className="flex-1" />
-        {/* 账户页签: 名称 + 当日盈亏 */}
-        <div className="flex items-center gap-1 p-0.5 rounded-btn bg-elevated">
+        {/* 账户页签: 名称 + 当日盈亏 (窄屏横滑) */}
+        <div className="flex items-center gap-1 p-0.5 rounded-btn bg-elevated max-w-[52vw] md:max-w-none overflow-x-auto [scrollbar-width:none] shrink-0">
           {[...accounts].sort((x, y) => (Number(x.id === 'default')) - Number(y.id === 'default')).map(a => {
             const active = a.id === activeAcc
             return (
@@ -605,7 +605,7 @@ export function Holdings() {
                           {name}{activePreset === name ? ' ✓' : ''} <span className="text-muted">({ps.order.length - ps.hidden.length} 列)</span>
                         </button>
                         <button onClick={() => { const next = { ...presets }; delete next[name]; persistPresets(next); if (activePreset === name) setActivePreset(null) }}
-                          className="opacity-0 group-hover:opacity-100 text-muted hover:text-danger text-[10px]">删</button>
+                          className="opacity-60 md:opacity-0 md:group-hover:opacity-100 text-muted hover:text-danger text-[10px] px-1 py-1">删</button>
                       </div>
                     ))}
                   </div>
@@ -622,7 +622,51 @@ export function Holdings() {
               className="text-[11px] text-accent hover:underline"
             >导出 Excel</button>
           </div>
-          <div className="overflow-x-auto">
+          {/* 移动端持仓卡片 (md 以下); 桌面表格见下方 */}
+          <div className="md:hidden divide-y divide-border/40">
+            {filteredRows.map(r => {
+              const badge = REGION_BADGE[r.region ?? 'CN']
+              return (
+                <div key={r.symbol}
+                  className="px-3 py-2.5 cursor-pointer active:bg-elevated/40 transition-colors"
+                  onClick={() => openPreview(r.symbol, r.name || '')}>
+                  <div className="flex items-center gap-1.5">
+                    {badge && <span className={`px-1 py-px rounded text-[9px] font-bold border shrink-0 ${badge.cls}`}>{badge.label}</span>}
+                    <span className="text-foreground font-medium truncate text-sm">{r.name || '—'}</span>
+                    <span className="font-mono text-[10px] text-muted shrink-0">{r.symbol}</span>
+                    <Spark closes={sparkMap.get(r.symbol) ?? []} width={52} height={18} />
+                    <div className="flex-1" />
+                    <button onClick={e => { e.stopPropagation(); setEditing(r) }}
+                      className="p-1.5 -mr-1 rounded-btn text-secondary touch-manipulation" aria-label="编辑/卖出">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-4 gap-1 items-center">
+                    <div>
+                      <div className={`text-sm font-semibold tabular-nums ${pnlColor(r.change_pct)}`}>{r.price?.toFixed(2) ?? '—'}</div>
+                      <div className={`text-[10px] tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</div>
+                    </div>
+                    <div>
+                      <div className="text-sm tabular-nums text-foreground">{fmtMoney(r.market_value, 0)}</div>
+                      <div className="text-[10px] text-muted">{r.qty}{r.available != null && r.available !== r.qty ? ` / ${r.available}` : ''} 股</div>
+                    </div>
+                    <div>
+                      <div className={`text-sm font-semibold tabular-nums ${pnlColor(r.float_pnl)}`}>{fmtMoney(r.float_pnl, 0)}</div>
+                      <div className={`text-[10px] tabular-nums ${pnlColor(r.float_pnl_pct)}`}>{fmtPct(r.float_pnl_pct)}</div>
+                    </div>
+                    <div>
+                      <div className={`text-sm font-semibold tabular-nums ${pnlColor(r.day_pnl)}`}>{fmtMoney(r.day_pnl, 0)}</div>
+                      <div className="text-[10px] text-muted">当日</div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            {filteredRows.length === 0 && (
+              <div className="px-3 py-10 text-center text-xs text-muted">暂无持仓</div>
+            )}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-[13px]" style={{ minWidth: visibleCols.reduce((w, k) => w + ({ name: 190, trend: 96, first_buy: 104, buy_avg: 96, market_value: 110, float_pnl: 132 } as Record<string, number>)[k] || 92, 40) }}>
               <thead>
                 <tr className="text-muted border-b border-border/60 bg-elevated/30">
@@ -657,8 +701,8 @@ export function Holdings() {
                       {visibleCols.map(k => <Fragment key={k}>{renderCell(k, r)}</Fragment>)}
                       <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
-                          <button onClick={() => setEditing(r)} className="p-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated" title="编辑/卖出"><Pencil className="h-3.5 w-3.5" /></button>
-                          <button onClick={() => remove.mutate(r.symbol)} className="p-1 rounded-btn text-secondary hover:text-danger hover:bg-elevated" title="删除记录"><Trash2 className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setEditing(r)} className="p-1.5 md:p-1 -mr-1 rounded-btn text-secondary hover:text-accent hover:bg-elevated touch-manipulation" title="编辑/卖出"><Pencil className="h-4 w-4 md:h-3.5 md:w-3.5" /></button>
+                          <button onClick={() => remove.mutate(r.symbol)} className="p-1.5 md:p-1 -mr-1 rounded-btn text-secondary hover:text-danger hover:bg-elevated touch-manipulation" title="删除记录"><Trash2 className="h-4 w-4 md:h-3.5 md:w-3.5" /></button>
                         </div>
                       </td>
                     </tr>
@@ -773,8 +817,8 @@ export function Holdings() {
 
         {/* 左: 持仓结构 + 个股盈亏贡献 (上下) | 右: 日收益日历 对齐 */}
         {rows.length > 0 && (
-          <div className="flex gap-4 items-stretch">
-            <div className="w-[46%] shrink-0 space-y-4">
+          <div className="flex flex-col md:flex-row gap-4 items-stretch">
+            <div className="w-full md:w-[46%] shrink-0 space-y-4">
               <div className="rounded-card border border-border bg-surface p-4">
                 <div className="flex items-center gap-2 mb-2"><PieIcon className="h-4 w-4 text-accent" /><span className="text-sm font-semibold text-foreground">持仓结构</span></div>
                 <HoldingsPie rows={rows} />

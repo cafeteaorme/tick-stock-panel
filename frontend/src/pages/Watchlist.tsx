@@ -464,7 +464,7 @@ const StockCard = React.memo(function StockCard({
         ) : (
           <button
             onClick={e => { e.stopPropagation(); onRequestRemove(r.symbol) }}
-            className="opacity-0 group-hover:opacity-100 text-muted hover:text-danger transition-all duration-150 p-0.5 rounded hover:bg-elevated"
+            className="opacity-60 md:opacity-0 md:group-hover:opacity-100 text-muted hover:text-danger transition-all duration-150 p-1.5 md:p-0.5 rounded hover:bg-elevated"
             aria-label="移除"
           >
             <Trash2 className="h-3.5 w-3.5" />
