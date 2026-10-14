@@ -11,6 +11,7 @@ import { EditDialog, AddDialog, HoldingsSettingsDialog, TzzbCookieDialog, Holdin
 import { BgTasksPanel, AiReportPanel } from '@/components/holdings/panels'
 import { useTzzbJobs } from '@/lib/useTzzbJobs'
 import { fmtMoney, fmtPct, pnlColor, REGION_BADGE, todayIso, LoadingSkeleton, ErrorBanner, Spark } from '@/components/holdings/shared'
+import { TradesHistorySection, CashFlowSection } from '@/components/holdings/trades'
 
 type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_value' | 'float_pnl' | 'day_pnl'
   | 'first_buy' | 'buy_avg' | 'trend'
@@ -736,6 +737,9 @@ export function Holdings() {
           </div>
         </div>
 
+        {/* 成交历史 (账本真实成交, 当前账户) */}
+        <TradesHistorySection account={activeAcc} onOpenSymbol={openPreview} />
+
         {/* 清仓明细 */}
         {closedRows.length > 0 && (
           <div className="rounded-card border border-border bg-surface overflow-hidden">
@@ -866,6 +870,9 @@ export function Holdings() {
             </div>
           </div>
         )}
+
+        {/* 资金流水 (账本资产趋势出入金, 全部账户合并) */}
+        <CashFlowSection trend={historyData.data?.asset_trend} bank={historyData.data?.bank} />
 
         {/* 月收益: 全宽, 与年收益同宽 */}
         <div className="rounded-card border border-border bg-surface p-4">

@@ -43,7 +43,7 @@ export function StockIntradayChart({
   // 真实成交 (投资账本): 当日成交按分钟聚合为 B/S 标记
   const tzzbTrades = useQuery({
     queryKey: ['holdings-tzzb-trades', symbol],
-    queryFn: () => api.holdingsTzzbTradesList(symbol),
+    queryFn: () => api.holdingsTzzbTradesList({ symbol }),
     enabled: !!symbol,
     staleTime: 60_000,
   })

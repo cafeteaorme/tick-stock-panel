@@ -595,7 +595,10 @@ def tzzb_open_login():
     """打开专用 Chrome 登录窗口 (用户登录一次, 配置目录持久记住登录态)。"""
     from app.services import tzzb
 
-    return tzzb.open_login_window()
+    try:
+        return tzzb.open_login_window()
+    except RuntimeError as e:  # 专用 Chrome 缺失/端口被占等, 返回明确原因而非 500
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.post("/tzzb/clear")
@@ -663,6 +666,62 @@ def delete_report(report_id: str):
     from app.services import tzzb
 
     return tzzb.delete_report(report_id)
+
+
+@router.get("/export/trades.csv")
+def export_trades_csv(request: Request, account: str | None = Query(None)):
+    """账本真实成交导出 CSV (UTF-8 BOM)。"""
+    import csv
+    import io
+
+    from app.services import tzzb
+    from fastapi.responses import StreamingResponse
+
+    obj = tzzb.load_trades_cache()
+    acc_name = None
+    if account:
+        acc_name = next((a["name"] for a in holdings_service.list_accounts()["accounts"]
+                         if a["id"] == account), None)
+    trades = [t for t in (obj.get("trades") or [])
+              if not acc_name or t.get("account_name") == acc_name]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["日期", "时间", "账户", "代码", "名称", "方向", "数量", "价格", "金额", "费用", "已实现"])
+    for t in sorted(trades, key=lambda x: (x.get("date", ""), x.get("time") or ""), reverse=True):
+        w.writerow([t.get("date"), t.get("time"), t.get("account_name"), t.get("symbol"),
+                    t.get("name"), t.get("bs"), t.get("qty"), t.get("price"),
+                    t.get("amount"), t.get("fee"), t.get("profit")])
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename=trades.csv"})
+
+
+@router.get("/export/cleared.csv")
+def export_cleared_csv(request: Request, account: str | None = Query(None)):
+    """清仓轮次导出 CSV (成交派生: 成本/卖价/已实现/费用)。"""
+    import csv
+    import io
+
+    from app.services import tzzb
+    from fastapi.responses import StreamingResponse
+
+    obj = tzzb.load_trades_cache()
+    acc_name = None
+    if account:
+        acc_name = next((a["name"] for a in holdings_service.list_accounts()["accounts"]
+                         if a["id"] == account), None)
+    rounds = [c for c in (obj.get("cleared") or [])
+              if not acc_name or c.get("account_name") == acc_name]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["账户", "代码", "名称", "首买日", "清仓日", "数量", "买入均价", "卖出均价", "已实现盈亏", "费用"])
+    for c in sorted(rounds, key=lambda x: x.get("last_sell") or "", reverse=True):
+        w.writerow([c.get("account_name"), c.get("symbol"), c.get("name"), c.get("first_buy"),
+                    c.get("last_sell"), c.get("qty"), c.get("avg_cost"), c.get("avg_sell"),
+                    c.get("profit"), c.get("fee")])
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
+                             headers={"Content-Disposition": "attachment; filename=cleared.csv"})
 
 
 class TargetRequest(BaseModel):
@@ -1098,8 +1157,10 @@ def benchmark(
 
 
 @router.get("/tzzb/trades")
-def tzzb_trades(symbol: str | None = Query(None)):
-    """缓存的账本真实成交 (可按 symbol 过滤) + 状态。"""
+def tzzb_trades(symbol: str | None = Query(None), account: str | None = Query(None),
+                bs: str | None = Query(None), start: str | None = Query(None),
+                end: str | None = Query(None)):
+    """缓存的账本真实成交 + 状态。过滤: symbol / account(本地账户 id) / bs(B|S) / start-end(YYYY-MM-DD)。"""
     from app.services import tzzb
 
     obj = tzzb.load_trades_cache()
@@ -1108,8 +1169,23 @@ def tzzb_trades(symbol: str | None = Query(None)):
            "n_trades": len(obj.get("trades") or []),
            "n_cleared": len(obj.get("cleared") or []),
            "n_bank": len(obj.get("bank") or [])}
+    trades = obj.get("trades") or []
+    if account:
+        acc_name = next((a["name"] for a in holdings_service.list_accounts()["accounts"]
+                         if a["id"] == account), None)
+        if acc_name:
+            trades = [t for t in trades if t.get("account_name") == acc_name]
     if symbol:
-        out["trades"] = [t for t in (obj.get("trades") or []) if t.get("symbol") == symbol]
+        trades = [t for t in trades if t.get("symbol") == symbol]
+    if bs in ("B", "S"):
+        trades = [t for t in trades if t.get("bs") == bs]
+    if start:
+        trades = [t for t in trades if t.get("date", "") >= start]
+    if end:
+        trades = [t for t in trades if t.get("date", "") <= end]
+    if symbol or account or bs or start or end:
+        out["trades"] = list(reversed(trades))  # 新→旧
+        out["n_filtered"] = len(out["trades"])
     return out
 
 

@@ -1570,10 +1570,19 @@ export const api = {
     ),
   holdingsTzzbTrades: () =>
     request<{ ok: boolean; fetched_at?: string; accounts: { fund_key: string; name: string; trades: number }[]; n_trades: number; n_cleared: number; n_bank: number }>('/api/holdings/tzzb/trades'),
-  holdingsTzzbTradesList: (symbol: string) =>
-    request<{ ok: boolean; trades: { date: string; time?: string; bs: string; price: number | null; qty: number | null; account_name: string }[] }>(
-      `/api/holdings/tzzb/trades?symbol=${encodeURIComponent(symbol)}`,
-    ),
+  holdingsTzzbTradesList: (opts?: { symbol?: string; account?: string; bs?: 'B' | 'S'; start?: string; end?: string }) => {
+    const p = new URLSearchParams()
+    if (opts?.symbol) p.set('symbol', opts.symbol)
+    if (opts?.account) p.set('account', opts.account)
+    if (opts?.bs) p.set('bs', opts.bs)
+    if (opts?.start) p.set('start', opts.start)
+    if (opts?.end) p.set('end', opts.end)
+    return request<{ ok: boolean; trades: { date: string; time?: string; bs: string; symbol: string; name?: string; price: number | null; qty: number | null; amount?: number | null; fee?: number | null; profit?: number | null; account_name: string }[]; n_filtered?: number }>(
+      `/api/holdings/tzzb/trades${p.size ? `?${p}` : ''}`,
+    )
+  },
+  holdingsRenameAccount: (id: string, name: string) =>
+    request<{ ok: boolean }>(`/api/holdings/accounts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   holdingsTzzbTradesRefresh: () =>
     request<{ started: boolean; status?: string }>('/api/holdings/tzzb/trades/refresh', { method: 'POST' }),
   holdingsTzzbJobs: () =>

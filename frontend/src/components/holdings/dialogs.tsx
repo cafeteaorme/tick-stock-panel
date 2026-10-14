@@ -401,6 +401,53 @@ export function HoldingsSettingsDialog({ accountId, onClose }: { accountId: stri
           <button onClick={onClose} className="p-1 rounded-btn text-secondary hover:bg-elevated"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {/* 账户管理: 重命名 / 删除 (删除进回收站, 保留最近 5 份) */}
+          {(() => {
+            const accountsQ = useQuery({ queryKey: QK.holdingsAccounts, queryFn: api.holdingsAccounts })
+            const cur = accountsQ.data?.accounts.find(a => a.id === accountId)
+            const [newName, setNewName] = useState(cur?.name ?? '')
+            const [confirmDel, setConfirmDel] = useState(false)
+            const isDefault = accountId === 'default'
+            return (
+              <div className="space-y-2.5">
+                <div className="text-[11px] font-medium text-secondary">账户管理</div>
+                <div className="flex items-center gap-2">
+                  <input value={newName} onChange={e => setNewName(e.target.value)}
+                    className="flex-1 h-8 px-2 rounded-btn bg-base border border-border text-xs text-foreground focus:outline-none focus:border-accent/50" />
+                  <button
+                    onClick={() => {
+                      if (!newName.trim() || newName === cur?.name) return
+                      api.holdingsRenameAccount(accountId, newName.trim())
+                        .then(() => {
+                          qc.invalidateQueries({ queryKey: QK.holdingsAccounts })
+                          qc.invalidateQueries({ queryKey: QK.holdings })
+                          toast('账户已重命名', 'success')
+                        })
+                        .catch(() => toast('重命名失败', 'error'))
+                    }}
+                    disabled={!newName.trim() || newName === cur?.name}
+                    className="h-8 px-3 rounded-btn bg-elevated text-xs text-secondary hover:text-foreground disabled:opacity-40">重命名</button>
+                </div>
+                {!isDefault && (confirmDel ? (
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-danger">删除「{cur?.name}」全部持仓/快照？(移入回收站, 保留最近 5 份)</span>
+                    <button
+                      onClick={() => {
+                        api.holdingsDeleteAccount(accountId)
+                          .then(() => { toast('账户已删除 (回收站保留)', 'success'); onClose() })
+                          .catch(() => toast('删除失败', 'error'))
+                      }}
+                      className="px-2 py-1 rounded-btn bg-danger/15 text-danger hover:bg-danger/25">确认删除</button>
+                    <button onClick={() => setConfirmDel(false)}
+                      className="px-2 py-1 rounded-btn bg-elevated text-secondary">取消</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmDel(true)}
+                    className="text-[11px] text-danger/70 hover:text-danger">删除此账户…</button>
+                ))}
+              </div>
+            )
+          })()}
           <div className="space-y-2.5">
             <div className="text-[11px] font-medium text-secondary">汇率与口径</div>
             {numField('港币兑人民币', '港股市值折算', hkRate, setHkRate)}
