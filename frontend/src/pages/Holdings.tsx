@@ -12,6 +12,7 @@ import { BgTasksPanel, AiReportPanel } from '@/components/holdings/panels'
 import { useTzzbJobs } from '@/lib/useTzzbJobs'
 import { fmtMoney, fmtPct, pnlColor, REGION_BADGE, todayIso, LoadingSkeleton, ErrorBanner, Spark } from '@/components/holdings/shared'
 import { TradesHistorySection, CashFlowSection } from '@/components/holdings/trades'
+import { AccountsCompareCard } from '@/components/holdings/compare'
 
 type SortKey = 'name' | 'price' | 'change_pct' | 'qty' | 'avg_cost' | 'market_value' | 'float_pnl' | 'day_pnl'
   | 'first_buy' | 'buy_avg' | 'trend'
@@ -361,6 +362,22 @@ export function Holdings() {
   const jobsQ = useTzzbJobs()
   const syncingNow = (jobsQ.data?.jobs ?? []).some(j => j.status === 'running')
 
+  // 切换账户: 设置本地+后端 active, 立即失效并重拉该账户全部数据 (页签与对比卡共用)
+  const switchAccount = (id: string) => {
+    if (id === activeAcc) return
+    setActiveAcc(id)
+    localStorage.setItem('tf-holdings-account', id)
+    api.holdingsSetActiveAccount(id).catch(() => {})
+    qc.invalidateQueries({ queryKey: QK.holdings })
+    qc.invalidateQueries({ queryKey: QK.holdingsSummary })
+    qc.invalidateQueries({ queryKey: ['holdings-pnl'] })
+    qc.invalidateQueries({ queryKey: ['holdings-benchmark'] })
+    qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() })
+    qc.invalidateQueries({ queryKey: QK.holdingsSparklines(id) })
+    qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbHistoryData, id] })
+    qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbMonthlyStats, id] })
+  }
+
   const doSync = async (isRefresh: boolean) => {
     setTzzbSyncing(true)
     try {
@@ -439,21 +456,7 @@ export function Holdings() {
             const active = a.id === activeAcc
             return (
               <button key={a.id}
-                onClick={() => {
-                  if (a.id === activeAcc) return
-                  setActiveAcc(a.id)
-                  localStorage.setItem('tf-holdings-account', a.id)
-                  api.holdingsSetActiveAccount(a.id).catch(() => {})
-                  // 切户: 立即失效并重拉该账户全部数据 (配合顶部进度条提示加载中)
-                  qc.invalidateQueries({ queryKey: QK.holdings })
-                  qc.invalidateQueries({ queryKey: QK.holdingsSummary })
-                  qc.invalidateQueries({ queryKey: ['holdings-pnl'] })
-                  qc.invalidateQueries({ queryKey: ['holdings-benchmark'] })
-                  qc.invalidateQueries({ queryKey: QK.holdingsTzzbClearedCheck() })
-                  qc.invalidateQueries({ queryKey: QK.holdingsSparklines(a.id) })
-                  qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbHistoryData, a.id] })
-                  qc.invalidateQueries({ queryKey: [...QK.holdingsTzzbMonthlyStats, a.id] })
-                }}
+                onClick={() => switchAccount(a.id)}
                 className={`px-2.5 py-1 rounded-[6px] text-xs transition-colors ${active ? 'bg-surface text-foreground font-medium shadow-sm' : 'text-secondary hover:text-foreground'}`}
                 title={`${a.name} · ${a.positions ?? 0} 只持仓${(a.tzzb_count ?? 0) > 0 ? ` · 账本同步 ${a.tzzb_count} 只` : ''}`}>
                 {a.name}
@@ -534,6 +537,7 @@ export function Holdings() {
             toast('本金已保存', 'success')
           }).catch(() => toast('保存失败', 'error'))
         }} />}
+        <AccountsCompareCard onPick={switchAccount} />
 
         {showAi && <AiReportPanel key={aiKey} onClose={() => setShowAi(false)} />}
 

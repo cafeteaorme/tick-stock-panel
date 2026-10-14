@@ -230,7 +230,7 @@ export function Indices() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[15rem_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[15rem_1fr] gap-4">
         <aside className="rounded-card border border-border bg-surface p-3">
           <div className="relative mb-3">
             <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted" />

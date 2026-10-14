@@ -143,7 +143,7 @@ function getLimitPrices(prevClose: number, priceLimit?: PriceLimitInfo): {
   return { limitUp, limitDown, upPct, downPct }
 }
 
-function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgPrices: number[], lineColor: string, areaColor: string, yMode: YMode, ct: ChartTheme, priceLimit?: PriceLimitInfo, showLimitLines = true, showAvgLine = true, region: Region = 'CN', bsMarkers?: IntradayBSMarker[]): EChartsOption {
+function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgPrices: number[], lineColor: string, areaColor: string, yMode: YMode, ct: ChartTheme, priceLimit?: PriceLimitInfo, showLimitLines = true, showAvgLine = true, region: Region = 'CN', bsMarkers?: IntradayBSMarker[], enableZoom = false): EChartsOption {
   // 将数据映射到全天时间轴上的正确位置
   const fullDayTimes = FULL_DAY_TIMES_BY_REGION[region]
   const timeIndexMap = new Map(fullDayTimes.map((t, i) => [t, i]))
@@ -309,6 +309,13 @@ function buildOption(data: MinuteKlineRow[], prevClose: number | undefined, avgP
     grid: [
       { left: 60, right: 55, top: 24, bottom: '28%' },
       { left: 60, right: 55, top: '74%', bottom: 20 },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], filterMode: 'none' },
+      { type: 'slider', xAxisIndex: [0, 1], filterMode: 'none', show: enableZoom,
+        height: 16, bottom: 2, left: 60, right: 55,
+        borderColor: 'rgba(128,128,140,0.3)', fillerColor: 'rgba(139,92,246,0.12)',
+        handleStyle: { color: '#8b5cf6' }, textStyle: { fontSize: 9, color: '#a1a1aa' } },
     ],
     xAxis: [
       {
@@ -488,6 +495,7 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
 
   const [infoIdx, setInfoIdx] = useState(data.length - 1)
   const [yMode, setYMode] = useState<YMode>('adaptive')
+  const [zoomOn, setZoomOn] = useState(false)
   const ct = useChartTheme()
   const avgPrices = useMemo(() => computeAvgPrice(data, region), [data, region])
 
@@ -563,11 +571,11 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
       }
       fullDayToDataIdx.current = mapping
 
-      chart.setOption(buildOption(data, prevClose, avgPrices, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region, bsMarkers), true)
+      chart.setOption(buildOption(data, prevClose, avgPrices, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region, bsMarkers, zoomOn), true)
     } else {
       chart.clear()
     }
-  }, [data, prevClose, height, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region, bsMarkers])
+  }, [data, prevClose, height, lineColor, areaFill, yMode, ct, priceLimit, showLimitLines, showAvgLine, region, bsMarkers, zoomOn])
 
   useEffect(() => {
     return () => {
@@ -592,6 +600,15 @@ export function EChartsIntraday({ data, height = 320, prevClose, date, priceLimi
   return (
     <div className="w-full">
       {/* 按钮行: 切换式按钮组, 居右 */}
+      <div className="flex items-center justify-end px-1 pb-0.5">
+        <button
+          onClick={() => { setZoomOn(v => !v) }}
+          className={`px-2.5 py-0.5 text-[10px] font-mono cursor-pointer rounded bg-elevated transition-colors ${
+            zoomOn ? 'text-accent' : 'text-muted hover:text-secondary'
+          }`}
+          title="触屏/鼠标缩放时间轴 (inside+滑块)"
+        >{zoomOn ? '缩放开' : '缩放'}</button>
+      </div>
       {showLimitLines && region === 'CN' && <div className="flex items-center justify-end px-1 pb-0.5">
         <div className="inline-flex items-center rounded bg-elevated overflow-hidden">
           <button

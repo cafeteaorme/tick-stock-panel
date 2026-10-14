@@ -1636,7 +1636,7 @@ export const api = {
   holdingsTzzbClear: () =>
     request<{ ok: boolean }>('/api/holdings/tzzb/clear', { method: 'POST' }),
   holdingsTzzbHistoryData: (account?: string) =>
-    request<{ cached: boolean; scope?: 'account' | 'merged'; account?: string; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[] }>(`/api/holdings/tzzb/history-data${account ? `?account=${encodeURIComponent(account)}` : ''}`),
+    request<{ cached: boolean; scope?: 'account' | 'merged'; account?: string; monthly?: { period: string; pnl: number }[]; yearly?: { period: string; pnl: number }[]; asset_trend?: { date: string; asset: number; fundIn: number; fundOut: number }[]; curve?: { period: string; pnl: number; cum: number }[]; bank?: Record<string, unknown>[]; accounts?: Record<string, { name: string; yearly?: { period: string; pnl: number }[]; curve?: { period: string; pnl: number; cum: number }[]; monthly?: { period: string; pnl: number }[] }> }>(`/api/holdings/tzzb/history-data${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsTargets: (account?: string) =>
     request<{ targets: Record<string, { tp?: number; sl?: number }> }>(`/api/holdings/targets${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   holdingsSetTarget: (symbol: string, tp: number | null, sl: number | null, account?: string) =>
