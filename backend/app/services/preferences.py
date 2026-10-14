@@ -103,6 +103,11 @@ def get_holdings_settings() -> dict:
         "benchmark": d.get("holdings_benchmark", "000001.SH"),    # 收益基准指数
         "snapshot_keep": int(d.get("holdings_snapshot_keep", 0)), # 0=全部保留
         "concentration_threshold": float(d.get("holdings_concentration_threshold", 0.4)),
+        # 止盈止损提醒渠道: macOS 系统通知 + 飞书 webhook (可选)
+        "target_notify": bool(d.get("holdings_target_notify", True)),
+        "target_webhook": d.get("holdings_target_webhook", ""),
+        # 成本口径: ledger=券商/账本成本, trades=成交重放当前轮买入均价
+        "cost_source": d.get("holdings_cost_source", "ledger"),
     }
 
 

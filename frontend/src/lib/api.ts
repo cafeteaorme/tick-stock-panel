@@ -357,6 +357,7 @@ export interface HoldingRow {
   settle_date?: string | null
   first_buy?: string | null
   buy_avg?: number | null
+  avg_cost_ledger?: number | null
   avg_sell?: number | null
   realized_pnl?: number | null
   price?: number | null
@@ -1664,10 +1665,12 @@ export const api = {
   // ---- 设置 ----
   holdingsSettings: () =>
     request<{ hk_rate: number; us_rate: number; hk_deposit_rate: number; benchmark: string; snapshot_keep: number }>('/api/holdings/settings'),
-  holdingsUpdateSettings: (body: { hk_rate?: number; us_rate?: number; hk_deposit_rate?: number; benchmark?: string; snapshot_keep?: number }) =>
-    request<{ hk_rate: number; us_rate: number; hk_deposit_rate: number; benchmark: string; snapshot_keep: number }>(
+  holdingsUpdateSettings: (body: { hk_rate?: number; us_rate?: number; hk_deposit_rate?: number; benchmark?: string; snapshot_keep?: number; target_notify?: boolean; target_webhook?: string; cost_source?: 'ledger' | 'trades' }) =>
+    request<{ hk_rate: number; us_rate: number; hk_deposit_rate: number; benchmark: string; snapshot_keep: number; target_notify: boolean; target_webhook: string; cost_source: 'ledger' | 'trades' }>(
       '/api/holdings/settings', { method: 'PUT', body: JSON.stringify(body) },
     ),
+  holdingsTargetAlert: (symbol: string, payload: { side: 'tp' | 'sl'; price: number; target: number; name?: string }) =>
+    request<{ ok: boolean; sent?: string[] }>(`/api/holdings/targets/${encodeURIComponent(symbol)}/alert`, { method: 'POST', body: JSON.stringify(payload), quiet: true }),
   holdingsReset: (account: string, includePortfolio = true) =>
     request<{ account: string; removed: number }>(
       `/api/holdings/reset?account=${encodeURIComponent(account)}&include_portfolio=${includePortfolio}`,

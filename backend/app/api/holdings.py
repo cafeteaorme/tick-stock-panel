@@ -65,6 +65,9 @@ class SettingsRequest(BaseModel):
     benchmark: str | None = None
     snapshot_keep: int | None = None
     concentration_threshold: float | None = None
+    target_notify: bool | None = None
+    target_webhook: str | None = None
+    cost_source: str | None = None
 
 
 def _acc(request: Request, account: str | None) -> str:
@@ -375,6 +378,12 @@ def list_holdings(request: Request, include_closed: bool = Query(False), account
     # 当前轮真实首买日期/买入均价 (成交重放)
     round_stats = tzzb.round_stats_for(acc_name, [r["symbol"] for r in enriched])
     enriched = [{**r, **(round_stats.get(r["symbol"]) or {})} for r in enriched]
+    # 成本口径: trades 模式下成本列显示成交重放买入均价 (账本值保留在 avg_cost_ledger)
+    if _rates().get("cost_source") == "trades":
+        for r in enriched:
+            if r.get("buy_avg") is not None and r.get("avg_cost") is not None:
+                r["avg_cost_ledger"] = r["avg_cost"]
+                r["avg_cost"] = r["buy_avg"]
     if include_closed:
         rows_all = holdings_service.list_all(acc, include_closed=True)
         closed_raw = [r for r in rows_all if r.get("status") == "closed"]
@@ -527,8 +536,15 @@ def update_settings(req: SettingsRequest):
         updates["holdings_snapshot_keep"] = max(0, int(req.snapshot_keep))
     if req.concentration_threshold is not None:
         updates["holdings_concentration_threshold"] = min(1.0, max(0.05, float(req.concentration_threshold)))
+    if req.target_notify is not None:
+        updates["holdings_target_notify"] = bool(req.target_notify)
+    if req.target_webhook is not None:
+        updates["holdings_target_webhook"] = str(req.target_webhook).strip()
+    if req.cost_source in ("ledger", "trades"):
+        updates["holdings_cost_source"] = req.cost_source
     if updates:
         preferences.save(updates)
+        _invalid_mkt_cache()  # 成本口径变化需重建行缓存
     return preferences.get_holdings_settings()
 
 
@@ -733,6 +749,44 @@ class TargetRequest(BaseModel):
 def get_targets(request: Request, account: str | None = Query(None)):
     acc = _acc(request, account)
     return {"targets": holdings_service.get_targets(acc)}
+
+
+class TargetAlertRequest(BaseModel):
+    side: str  # 'tp' | 'sl'
+    price: float
+    target: float
+    name: str | None = None
+
+
+@router.post("/targets/{symbol}/alert")
+def target_alert(symbol: str, req: TargetAlertRequest):
+    """止盈/止损触达上报: 页内 toast 之外, 转发系统通知 + webhook (按设置开关)。"""
+    from app.services import notify_adapter
+    from app.services import preferences
+
+    st = preferences.get_holdings_settings()
+    if not st.get("target_notify") and not st.get("target_webhook"):
+        return {"ok": True, "sent": False}
+    name = req.name or symbol
+    label = "已达止盈价" if req.side == "tp" else "已破止损价"
+    title = f"持仓提醒 · {name}"
+    msg = f"{label} {req.target} (现价 {req.price})"
+    sent = []
+    try:
+        if st.get("target_notify") and notify_adapter.notify(title, msg):
+            sent.append("notify")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("target notify failed: %s", e)
+    hook = st.get("target_webhook")
+    if hook:
+        try:
+            from app.services import webhook_adapter
+
+            if webhook_adapter.send_feishu(hook, title, msg):
+                sent.append("webhook")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("target webhook failed: %s", e)
+    return {"ok": True, "sent": sent}
 
 
 @router.post("/targets/{symbol}")

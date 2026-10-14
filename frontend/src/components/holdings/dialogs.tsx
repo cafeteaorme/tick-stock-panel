@@ -339,16 +339,22 @@ export function HoldingsSettingsDialog({ accountId, onClose }: { accountId: stri
   const [deposit, setDeposit] = useState('')
   const [bench, setBench] = useState('000001.SH')
   const [keep, setKeep] = useState('')
+  const [targetNotify, setTargetNotify] = useState(true)
+  const [webhook, setWebhook] = useState('')
+  const [costSource, setCostSource] = useState<'ledger' | 'trades'>('ledger')
   const [confirmReset, setConfirmReset] = useState(false)
   const loaded = useRef(false)
 
   useEffect(() => {
     if (loaded.current || !settings.data) return
     loaded.current = true
-    const d = settings.data
+    const d = settings.data as Record<string, unknown>
     setHkRate(String(d.hk_rate)); setUsRate(String(d.us_rate))
-    setDeposit(String(Math.round(d.hk_deposit_rate * 1000) / 10)); setBench(d.benchmark)
+    setDeposit(String(Math.round((d.hk_deposit_rate as number) * 1000) / 10)); setBench(d.benchmark as string)
     setKeep(d.snapshot_keep ? String(d.snapshot_keep) : '')
+    setTargetNotify(d.target_notify !== false)
+    setWebhook((d.target_webhook as string) || '')
+    setCostSource(d.cost_source === 'trades' ? 'trades' : 'ledger')
   }, [settings.data])
 
   const save = useMutation({
@@ -358,6 +364,9 @@ export function HoldingsSettingsDialog({ accountId, onClose }: { accountId: stri
       hk_deposit_rate: deposit ? Number(deposit) / 100 : undefined,
       benchmark: bench,
       snapshot_keep: keep ? Number(keep) : 0,
+      target_notify: targetNotify,
+      target_webhook: webhook,
+      cost_source: costSource,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK.holdingsSettings })
@@ -448,7 +457,33 @@ export function HoldingsSettingsDialog({ accountId, onClose }: { accountId: stri
               </div>
             )
           })()}
-          <div className="space-y-2.5">
+            {/* 提醒与成本口径 */}
+            <div className="space-y-2.5">
+              <div className="text-[11px] font-medium text-secondary">提醒与成本口径</div>
+              <label className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-secondary">止盈止损系统通知<span className="text-muted ml-1">Mac 通知中心</span></span>
+                <input type="checkbox" checked={targetNotify} onChange={e => setTargetNotify(e.target.checked)}
+                  className="rounded border-border h-4 w-4" />
+              </label>
+              <label className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-secondary shrink-0">Webhook<span className="text-muted ml-1">飞书机器人, 可空</span></span>
+                <input value={webhook} onChange={e => setWebhook(e.target.value)} placeholder="https://open.feishu.cn/…"
+                  className="flex-1 min-w-0 h-8 px-2 rounded-btn bg-base border border-border text-[11px] text-foreground focus:outline-none focus:border-accent/50" />
+              </label>
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="text-secondary">成本列口径</span>
+                <div className="inline-flex rounded-btn bg-elevated overflow-hidden">
+                  {([['ledger', '账本成本'], ['trades', '买入均价']] as const).map(([v, l]) => (
+                    <button key={v} onClick={() => setCostSource(v)}
+                      className={`px-2.5 py-1 text-[11px] ${costSource === v ? 'bg-accent/20 text-accent font-medium' : 'text-muted hover:text-secondary'}`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="text-[10px] text-muted leading-relaxed">
+                买入均价 = 成交重放当前轮的加权买价 (不含已卖分摊); 账本成本 = 券商摊薄口径, 悬浮成本列可互查。
+              </div>
+            </div>
+            <div className="space-y-2.5">
             <div className="text-[11px] font-medium text-secondary">汇率与口径</div>
             {numField('港币兑人民币', '港股市值折算', hkRate, setHkRate)}
             <HkRateAuto setHkRate={setHkRate} />

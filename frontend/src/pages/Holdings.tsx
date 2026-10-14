@@ -177,6 +177,10 @@ export function Holdings() {
       if (localStorage.getItem(key)) continue
       localStorage.setItem(key, '1')
       toast(`${r.name || r.symbol} ${hitTp ? '已达止盈价' : '已破止损价'} ${hitTp ? tg.tp : tg.sl} (现价 ${price})`, hitTp ? 'success' : 'error')
+      // 页外渠道: macOS 系统通知 + 飞书 webhook (按设置开关, 服务端执行)
+      api.holdingsTargetAlert(r.symbol, {
+        side: hitTp ? 'tp' : 'sl', price, target: (hitTp ? tg.tp : tg.sl)!, name: r.name || undefined,
+      }).catch(() => {})
     }
   }, [holdings.data, targetsQ.data])
   const [showTasks, setShowTasks] = useState(false)
@@ -329,7 +333,7 @@ export function Holdings() {
       case 'change_pct': return <td className={`px-3 py-2.5 tabular-nums ${pnlColor(r.change_pct)}`}>{fmtPct(r.change_pct)}</td>
       case 'trend': return <td className="px-3 py-2.5"><Spark closes={sparkMap.get(r.symbol) ?? []} /></td>
       case 'qty': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.qty}{r.available != null && r.available !== r.qty ? <span className="text-muted"> / {r.available}</span> : ''}</td>
-      case 'avg_cost': return <td className="px-3 py-2.5 tabular-nums text-secondary">{r.avg_cost?.toFixed(3) ?? '—'}</td>
+      case 'avg_cost': return <td className="px-3 py-2.5 tabular-nums text-secondary" title={r.avg_cost_ledger != null ? `账本成本 ${r.avg_cost_ledger.toFixed(3)}` : undefined}>{r.avg_cost?.toFixed(3) ?? '—'}</td>
       case 'market_value': return <td className="px-3 py-2.5 tabular-nums text-foreground">{r.qty === 0 ? '—' : fmtMoney(r.market_value)}</td>
       case 'float_pnl': return (
         <td className={`px-3 py-2.5 tabular-nums font-semibold ${pnlColor(r.float_pnl)}`}>
